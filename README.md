@@ -115,6 +115,7 @@ env:
 
 Set `CODE_REVIEW_PATHS` to match where your project's custom or main code lives.  
 This keeps automated reviews targeted and reduces noise from dependencies and vendor code.
+
 ---
 
 ### 🏷️🔒 Variables & Secrets 
