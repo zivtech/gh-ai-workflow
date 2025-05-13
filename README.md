@@ -19,7 +19,23 @@ This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) mode
 - **Excludes:** Noise files such as dependencies, images, binaries, archives, VCS metadata, and generated assets.
 - **Feedback:** Posts the OpenAI analysis as a PR comment for team review.
 
-### Supported Trunk Branches (How to Specify PR Targets)
+---
+
+### How to Add This Workflow to a Repository 📝
+
+1. **Copy the Workflow 📄**
+    - Copy the contents of [.github/workflows/ai-code-quality.yml](.github/workflows/ai-code-quality.yml).
+    - Save the YAML file as `.github/workflows/ai-code-quality.yml`.
+
+2. **Set Up Secrets & Variables 🔒🏷️**
+    - `OPENAI_API_KEY`, `OPENAI_CODE_REVIEW_PROMPT`, and `OPENAI_CODE_REVIEW_MODEL` are **already configured organization-wide**.
+    - You may override them for your repository in **Settings → Secrets and variables → Actions**.
+
+3. **Test the Workflow ✅**
+    - Open or update a PR targeting the configured trunk branch.
+    - The AI-powered review runs automatically.
+
+### Supported Trunk Branches (How to Specify PR Targets) 🌳
 
 By **default**, this workflow only runs on PRs where the target (base) branch is `master`.
 
@@ -56,21 +72,6 @@ on:
 - Only PRs targeting one of the specified trunks will trigger the review.
 - Edit this in `.github/workflows/ai-code-quality.yml` under `on.pull_request.branches`.
 - Commit and push the update for changes to take effect.
-
----
-
-### How to Add This Workflow to a Repository 📝
-
-1. **Copy the Workflow 📄**
-    - Save the YAML file as `.github/workflows/ai-code-quality.yml`.
-
-2. **Set Up Secrets & Variables 🔒🏷️**
-    - `OPENAI_API_KEY`, `OPENAI_CODE_REVIEW_PROMPT`, and `OPENAI_CODE_REVIEW_MODEL` are **already configured organization-wide**.
-    - You may override them for your repository in **Settings → Secrets and variables → Actions**.
-
-3. **Test the Workflow ✅**
-    - Open or update a PR targeting the configured trunk branch.
-    - The AI-powered review runs automatically.
 
 ---
 
