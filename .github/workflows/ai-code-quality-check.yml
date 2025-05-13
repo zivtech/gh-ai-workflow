@@ -1,0 +1,133 @@
+name: AI Code Quality and Security Check
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  AI-Quality-Security-Check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Ensure full history for proper diff
+
+      - name: Gather full code from changed files
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD web/modules/custom/* web/themes/custom/*)
+          # Build a JSON array containing filenames and their content
+          echo '{"original files": [' > original_files_temp.json
+          for file in $CHANGED_FILES; do
+            # ------------------------------------------------------------------------------
+            # File Exclusion Rules for Automated Code Review
+            #
+            # The following block skips files and directories that are typically unnecessary
+            # or undesirable for code review, such as binary assets, dependencies, generated
+            # files, build artifacts, and configuration or metadata files. This ensures that
+            # the code review process focuses only on relevant source code and scripts.
+            #
+            # Categories excluded:
+            #   - Dependency directories:      vendor/, node_modules/, bower_components/
+            #   - Build artifacts:             dist/, build/, out/
+            #   - Version control metadata:    .git/, .svn/, .hg/
+            #   - Coverage and reports:        coverage/, reports/
+            #   - Static assets:               Images (png, jpg, svg, etc), videos, audio
+            #   - Binary files:                Compiled libraries and executables
+            #   - Archives and large assets:   zip, tar, 7z, pdf, office files
+            #   - Lock and manifest files:     package-lock.json, yarn.lock, composer.lock
+            #   - Minified and generated files: .min.js, .min.css, .map, .pyc
+            #   - Environment/config/OS files: .env, .DS_Store, Thumbs.db
+            #
+            # Extend this list as appropriate for your project.
+            # ------------------------------------------------------------------------------
+            if [[ $file == *.json ]] || [[ $file == *.txt ]] || [[ $file == *.css ]] \
+               || [[ $file == *vendor* ]] || [[ $file == *node_modules* ]] || [[ $file == *bower_components* ]] \
+               || [[ $file == *dist* ]] || [[ $file == *build* ]] || [[ $file == *.min.js ]] || [[ $file == *.min.css ]] \
+               || [[ $file == *.png ]] || [[ $file == *.jpg ]] || [[ $file == *.jpeg ]] || [[ $file == *.gif ]] || [[ $file == *.bmp ]] || [[ $file == *.svg ]] \
+               || [[ $file == *.webp ]] || [[ $file == *.ico ]] || [[ $file == *.tiff ]] || [[ $file == *.psd ]] || [[ $file == *.ai ]] || [[ $file == *.eps ]] \
+               || [[ $file == *.zip ]] || [[ $file == *.tar ]] || [[ $file == *.gz ]] || [[ $file == *.rar ]] \
+               || [[ $file == *.pdf ]] || [[ $file == *.docx ]] || [[ $file == *.xlsx ]] || [[ $file == *.pptx ]] \
+               || [[ $file == *.exe ]] || [[ $file == *.dll ]] || [[ $file == *.so ]] || [[ $file == *.dylib ]] \
+               || [[ $file == *.class ]] || [[ $file == *.jar ]] || [[ $file == *.pyc ]] || [[ $file == *.pyo ]] \
+               || [[ $file == *.o ]] || [[ $file == *.a ]] || [[ $file == *.lib ]] || [[ $file == *.pdb ]] \
+               || [[ $file == *.7z ]] || [[ $file == *.mp3 ]] || [[ $file == *.mp4 ]] || [[ $file == *.avi ]] || [[ $file == *.mkv ]] || [[ $file == *.mov ]] || [[ $file == *.wav ]] \
+               || [[ $file == *.map ]] || [[ $file == *.proto ]] || [[ $file == *.env ]] || [[ $file == *.DS_Store ]] || [[ $file == *Thumbs.db ]] \
+               || [[ $file == *.snap ]] \
+               || [[ $file == .git/* ]] || [[ $file == .github/* ]] \
+               || [[ $file == .gitlab/* ]] || [[ $file == .circleci/* ]] \
+               || [[ $file == coverage/* ]] || [[ $file == reports/* ]]; then
+              continue
+            fi
+
+            # If the file still exists (i.e., wasn't deleted)
+            if [ -f "$file" ]; then
+              CONTENT=$(jq -Rs . < "$file")
+              echo "{\"filename\": \"$file\", \"content\": $CONTENT}," >> original_files_temp.json
+            fi
+          done
+
+          # Remove trailing comma on the last file entry and close JSON
+          sed -i '$ s/,$//' original_files_temp.json
+          echo "]}" >> original_files_temp.json
+
+      - name: Display processed diff
+        run: cat original_files_temp.json
+
+      - name: Get diff
+        run: |
+          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD web/modules/custom/* web/themes/custom/* \
+            | grep '^[+-]' \
+            | grep -Ev '^(---|\+\+\+)' > code_changes_only.txt
+                      jq -Rs '{diff: .}' code_changes_only.txt > diff.json
+          if [ -f original_files_temp.json ]; then
+            jq -s '.[0] * .[1]' diff.json original_files_temp.json > combined.json
+            mv combined.json diff.json
+          fi
+
+      - name: Display Processed Diff (Debug)
+        run: cat diff.json
+
+      - name: Analyze with OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          DIFF_CONTENT=$(jq -r '.diff' diff.json)
+          ORIGINAL_FILES=$(jq -r '."original files"' diff.json)
+          PROMPT="${{ vars.OPENAI_CODE_REVIEW_PROMPT }}:\n\nDIFF:\n${DIFF_CONTENT}\n\nORIGINAL FILES:\n${ORIGINAL_FILES}"
+          jq -n --arg prompt "$PROMPT" --arg model "${{ vars.OPENAI_CODE_REVIEW_MODEL }}" '{
+            "model": $model,
+            "messages": [
+              { "role": "system", "content": "You are an expert Drupal code reviewer." },
+              { "role": "user", "content": $prompt }
+            ]
+          }' > request.json
+          curl -sS https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+            -d @request.json > response.json
+
+      - name: Extract Review Message
+        id: extract_message
+        run: |
+          ASSISTANT_MSG=$(jq -r '.choices[0].message.content' response.json)
+          {
+            echo "message<<EOF"
+            echo "$ASSISTANT_MSG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          echo $ASSISTANT_MSG
+
+      - name: Post Comment to PR
+        env:
+          COMMENT: ${{ steps.extract_message.outputs.message }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            -f body="$COMMENT"
