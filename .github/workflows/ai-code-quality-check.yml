@@ -12,6 +12,8 @@ permissions:
 jobs:
   AI-Quality-Security-Check:
     runs-on: ubuntu-latest
+    env:
+      CODE_REVIEW_PATHS: "web/modules/custom/* web/themes/custom/*"
     steps:
       - name: Check out code
         uses: actions/checkout@v3
@@ -20,7 +22,7 @@ jobs:
 
       - name: Gather full code from changed files
         run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD web/modules/custom/* web/themes/custom/*)
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD $CODE_REVIEW_PATHS)
           # Build a JSON array containing filenames and their content
           echo '{"original files": [' > original_files_temp.json
           for file in $CHANGED_FILES; do
@@ -81,7 +83,7 @@ jobs:
 
       - name: Get diff
         run: |
-          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD web/modules/custom/* web/themes/custom/* \
+          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD $CODE_REVIEW_PATHS \
             | grep '^[+-]' \
             | grep -Ev '^(---|\+\+\+)' > code_changes_only.txt
                       jq -Rs '{diff: .}' code_changes_only.txt > diff.json
