@@ -24,8 +24,8 @@ This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) mode
 ### How to Add This Workflow to a Repository 📝
 
 1. **Copy the Workflow 📄**
-    - Copy the contents of [.github/workflows/ai-code-quality.yml](.github/workflows/ai-code-quality.yml).
-    - Save the YAML file as `.github/workflows/ai-code-quality.yml`.
+    - Copy the contents of [.github/workflows/ai-code-quality-check.yml](.github/workflows/ai-code-quality-check.yml).
+    - Save the YAML file as `.github/workflows/ai-code-quality-check.yml`.
 
 2. **Set Up Secrets & Variables 🔒🏷️**
     - `OPENAI_API_KEY`, `OPENAI_CODE_REVIEW_PROMPT`, and `OPENAI_CODE_REVIEW_MODEL` are **already configured organization-wide**.
@@ -34,6 +34,8 @@ This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) mode
 3. **Test the Workflow ✅**
     - Open or update a PR targeting the configured trunk branch.
     - The AI-powered review runs automatically.
+
+---
 
 ### Supported Trunk Branches (How to Specify PR Targets) 🌳
 
