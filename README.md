@@ -1,4 +1,4 @@
-# GitHub Workflows 🚀
+# 🚀 GitHub Workflows
 
 This repository contains automated workflows used by Zivtech to improve engineering processes, code quality, and security.  
 **All workflows in this repository are documented in this README.** Please update this file when new workflows are added.
@@ -8,7 +8,7 @@ This repository contains automated workflows used by Zivtech to improve engineer
 
 ---
 
-## AI Code Quality & Security Check 🤖🛡️
+## 🤖🛡️ AI Code Quality & Security Check 
 
 This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) models to provide automated reviews of code changes for quality and security, posting AI-generated feedback directly on pull requests related to custom Drupal modules and themes.
 
@@ -21,23 +21,23 @@ This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) mode
 
 ---
 
-### How to Add This Workflow to a Repository 📝
+### 📝 How to Add This Workflow to a Repository
 
-1. **Copy the Workflow 📄**
+1. **📄 Copy the Workflow**
     - Copy the contents of [.github/workflows/ai-code-quality-check.yml](.github/workflows/ai-code-quality-check.yml).
     - Save the YAML file as `.github/workflows/ai-code-quality-check.yml`.
 
-2. **Set Up Secrets & Variables 🔒🏷️**
+2. **🔒🏷️ Set Up Secrets & Variables**
     - `OPENAI_API_KEY`, `OPENAI_CODE_REVIEW_PROMPT`, and `OPENAI_CODE_REVIEW_MODEL` are **already configured organization-wide**.
     - You may override them for your repository in **Settings → Secrets and variables → Actions**.
 
-3. **Test the Workflow ✅**
+3. **✅ Test the Workflow**
     - Open or update a PR targeting the configured trunk branch.
     - The AI-powered review runs automatically.
 
 ---
 
-### Supported Trunk Branches (How to Specify PR Targets) 🌳
+### 🌳 Supported Trunk Branches (How to Specify PR Targets)
 
 By **default**, this workflow only runs on PRs where the target (base) branch is `master`.
 
@@ -76,8 +76,48 @@ on:
 - Commit and push the update for changes to take effect.
 
 ---
+### 🌐 Customizing Reviewed Paths
 
-### Variables & Secrets 🏷️🔒
+By default, this workflow analyzes code changes in the following locations:
+
+- `web/modules/custom/*` (custom modules)
+- `web/themes/custom/*` (custom themes)
+
+These paths are set using the environment variable:
+
+```yaml
+env:
+  CODE_REVIEW_PATHS: "web/modules/custom/* web/themes/custom/*"
+```
+
+#### 🔀 How to Customize
+
+To review code in different directories or files, **override `CODE_REVIEW_PATHS`** in your workflow YAML.  
+For example:
+
+```yaml
+env:
+  CODE_REVIEW_PATHS: "src/* custom/plugins/*"
+```
+
+You can include multiple patterns separated by spaces.
+
+#### 📝 Example Override
+
+To review only `src/` and all PHP files in `extensions/`:
+
+```yaml
+env:
+  CODE_REVIEW_PATHS: "src/* extensions/*.php"
+```
+
+#### 💡 Tip
+
+Set `CODE_REVIEW_PATHS` to match where your project's custom or main code lives.  
+This keeps automated reviews targeted and reduces noise from dependencies and vendor code.
+---
+
+### 🏷️🔒 Variables & Secrets 
 
 | Name                        | Set at                 | Description                                                                                                                                      |
 |-----------------------------|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -87,11 +127,11 @@ on:
 
 By default, **no further action is needed**, but you can override these settings per project if needed in **Settings → Secrets and variables → Actions**.
 
-> **Security Note 🔒💡:**  
+> **🔒💡 Security Note:**  
 > For security best practices, ensure your `OPENAI_API_KEY` is created with strictly limited permissions—**it should only have "Write" access for Model capabilities** (used to chat/completions endpoints). Do not grant broader permissions that your workflow does not require.
 ---
 
-### Excluded Files & Folders 📦
+### 📦 Excluded Files & Folders
 
 The workflow ignores files and directories not relevant to code review, including:
 
@@ -110,7 +150,7 @@ You can adjust these in the exclusion logic within the workflow YAML if your pro
 
 ---
 
-### Workflow Process 🧰
+### 🧰 Workflow Process
 
 1. **Checkout repo** using [actions/checkout](https://github.com/actions/checkout) with full git history for accurate diffs.
 2. **Identify changed files** in the supported directories.
@@ -121,7 +161,7 @@ You can adjust these in the exclusion logic within the workflow YAML if your pro
 
 ---
 
-### References ℹ️
+### ℹ️ References
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [GitHub Actions Variables](https://docs.github.com/en/actions/learn-github-actions/variables)
@@ -131,7 +171,7 @@ You can adjust these in the exclusion logic within the workflow YAML if your pro
 
 ---
 
-## Adding More Workflows 🧰
+## 🧰 Adding More Workflows
 
 Additional workflows should be added under `.github/workflows/` and documented in a new section below, including:
 
