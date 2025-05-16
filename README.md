@@ -121,7 +121,7 @@ This keeps automated reviews targeted and reduces noise from dependencies and ve
 ### 🏷️🔒 Variables & Secrets 
 
 This workflow relies on several [GitHub Actions organization-level variables](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows) for consistent configuration across all repositories.  
-**Any of these can be overridden per repository** by adding a [repository variable of the same name](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#defining-configuration-variables-for-a-single-repository).
+**Any of these can be overridden per repository** by adding a [repository variable of the same name](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#creating-configuration-variables-for-a-repository).
 
 > 🔗 [Learn how to define and manage variables in GitHub Actions (official docs)](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables)
 
