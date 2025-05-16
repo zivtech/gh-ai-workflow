@@ -132,7 +132,7 @@ This workflow relies on several [GitHub Actions organization-level variables](ht
 | `OPENAI_CODE_REVIEW_MODEL`        | Org Variable           | OpenAI model name (e.g. `gpt-4o`, `gpt-4`). Check out [Models](https://platform.openai.com/docs/models) to compare the various available models. |
 | `CODE_REVIEW_FILE_EXCLUDE_REGEX`  | Org Variable           | Pipe-separated regex: any match is excluded from review                                                                                          |
 
-By default, **no further action is needed**, but you You can override any of these variables (or secrets) for a particular repository:
+By default, **no further action is needed**, but you can override any of these variables (or secrets) for a particular repository:
 - Go to **Settings → Secrets and variables → Actions**
 - Add a new variable (or secret), using the **exact same name** as the organization variable to override it
 
