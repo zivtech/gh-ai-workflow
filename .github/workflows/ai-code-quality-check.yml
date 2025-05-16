@@ -85,10 +85,19 @@ jobs:
 
       - name: Get diff
         run: |
-          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD $CODE_REVIEW_PATHS \
-            | grep '^[+-]' \
-            | grep -Ev '^(---|\+\+\+)' > code_changes_only.txt
-                      jq -Rs '{diff: .}' code_changes_only.txt > diff.json
+          # Parse filtered file paths from the JSON
+          FILES_FROM_JSON=$(jq -r '."original files"[].filename' original_files_temp.json)
+
+          # Generate the diff for only these files
+          if [ -n "$FILES_FROM_JSON" ]; then
+            git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- $FILES_FROM_JSON \
+              | grep '^[+-]' | grep -Ev '^(---|\+\+\+)' > code_changes_only.txt
+          else
+            echo '' > code_changes_only.txt
+          fi
+
+          jq -Rs '{diff: .}' code_changes_only.txt > diff.json
+
           if [ -f original_files_temp.json ]; then
             jq -s '.[0] * .[1]' diff.json original_files_temp.json > combined.json
             mv combined.json diff.json
