@@ -28,7 +28,7 @@ This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) mode
     - Save the YAML file as `.github/workflows/ai-code-quality-check.yml`.
 
 2. **🔒🏷️ Set Up Secrets & Variables**
-    - `OPENAI_API_KEY`, `OPENAI_CODE_REVIEW_PROMPT`, and `OPENAI_CODE_REVIEW_MODEL` are **already configured organization-wide**.
+    - `OPENAI_API_KEY`, `OPENAI_CODE_REVIEW_PROMPT`, `OPENAI_CODE_REVIEW_MODEL`, and `CODE_REVIEW_FILE_EXCLUDE_REGEX` are **already configured organization-wide**.
     - You may override them for your repository in **Settings → Secrets and variables → Actions**.
 
 3. **✅ Test the Workflow**
@@ -120,13 +120,23 @@ This keeps automated reviews targeted and reduces noise from dependencies and ve
 
 ### 🏷️🔒 Variables & Secrets 
 
-| Name                        | Set at                 | Description                                                                                                                                      |
-|-----------------------------|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| `OPENAI_API_KEY`            | Org Secret             | [OpenAI API key](https://platform.openai.com/account/api-keys)                                                                                   |
-| `OPENAI_CODE_REVIEW_PROMPT` | Org Variable           | Prompt for code reviews sent to OpenAI                                                                                                           |
-| `OPENAI_CODE_REVIEW_MODEL`  | Org Variable           | OpenAI model name (e.g. `gpt-4o`, `gpt-4`). Check out [Models](https://platform.openai.com/docs/models) to compare the various available models. |
+This workflow relies on several [GitHub Actions organization-level variables](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows) for consistent configuration across all repositories.  
+**Any of these can be overridden per repository** by adding a [repository variable of the same name](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#defining-configuration-variables-for-a-single-repository).
 
-By default, **no further action is needed**, but you can override these settings per project if needed in **Settings → Secrets and variables → Actions**.
+> 🔗 [Learn how to define and manage variables in GitHub Actions (official docs)](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables)
+
+| Name                              | Set at                 | Description                                                                                                                                      |
+|-----------------------------------|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `OPENAI_API_KEY`                  | Org Secret             | [OpenAI API key](https://platform.openai.com/account/api-keys)                                                                                   |
+| `OPENAI_CODE_REVIEW_PROMPT`       | Org Variable           | Prompt for code reviews sent to OpenAI                                                                                                           |
+| `OPENAI_CODE_REVIEW_MODEL`        | Org Variable           | OpenAI model name (e.g. `gpt-4o`, `gpt-4`). Check out [Models](https://platform.openai.com/docs/models) to compare the various available models. |
+| `CODE_REVIEW_FILE_EXCLUDE_REGEX`  | Org Variable           | Pipe-separated regex: any match is excluded from review                                                                                          |
+
+By default, **no further action is needed**, but you You can override any of these variables (or secrets) for a particular repository:
+- Go to **Settings → Secrets and variables → Actions**
+- Add a new variable (or secret), using the **exact same name** as the organization variable to override it
+
+For more, see [GitHub’s documentation on defining configuration variables](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables).
 
 > **🔒💡 Security Note:**  
 > For security best practices, ensure your `OPENAI_API_KEY` is created with strictly limited permissions—**it should only have "Write" access for Model capabilities** (used to chat/completions endpoints). Do not grant broader permissions that your workflow does not require.
@@ -134,8 +144,12 @@ By default, **no further action is needed**, but you can override these settings
 
 ### 📦 Excluded Files & Folders
 
-The workflow ignores files and directories not relevant to code review, including:
+The workflow ignores files and directories not relevant to code review, as defined by the **organization variable** `CODE_REVIEW_FILE_EXCLUDE_REGEX`.  
+This variable contains a regular expression that matches all file patterns to exclude.
 
+**[See the Variables & Secrets section for instructions and examples on how to override this variable at the repository level.](#variables--secrets)**
+
+By default, the following are excluded:
 - `vendor/`, `node_modules/`, `bower_components/` (dependencies)
 - `dist/`, `build/`, `out/` (build outputs)
 - `.git/`, `.github/`, `.gitlab/`, `.circleci/` (VCS metadata)
@@ -147,7 +161,14 @@ The workflow ignores files and directories not relevant to code review, includin
 - OS/config files: (`.env`, `.DS_Store`, `Thumbs.db`)
 - Lockfiles and manifests (e.g. `composer.lock`)
 
-You can adjust these in the exclusion logic within the workflow YAML if your project has additional needs.
+**Example:**  
+To exclude all `.test.js` files and the `sandbox/` directory (in addition to the org defaults), add or override the variable in your repository:
+
+```text
+\.test\.js$|sandbox/|<org default regex goes here>
+```
+
+Replace `<org default regex goes here>` with the default organization regex, or list only your overrides if you want just your patterns.
 
 ---
 
