@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CODE_REVIEW_PATHS: "web/modules/custom/* web/themes/custom/*"
+      CODE_REVIEW_FILE_EXCLUDE_REGEX: ${{ vars.CODE_REVIEW_FILE_EXCLUDE_REGEX }}
     steps:
       - name: Check out code
         uses: actions/checkout@v3
@@ -21,6 +22,7 @@ jobs:
           fetch-depth: 0  # Ensure full history for proper diff
 
       - name: Gather full code from changed files
+        id: gather_code
         run: |
           # ------------------------------------------------------------------------------
           # Organization Variable Documentation
@@ -66,24 +68,39 @@ jobs:
           # ------------------------------------------------------------------------------
           #
           # Get changed files, filtering out those that match the exclusion regex
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD $CODE_REVIEW_PATHS | grep -Ev "${{ vars.CODE_REVIEW_FILE_EXCLUDE_REGEX }}")
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD $CODE_REVIEW_PATHS)
 
           # Build a JSON array containing filenames and their content
           echo '{"original files": [' > original_files_temp.json
-          for file in $CHANGED_FILES; do
-            if [ -f "$file" ]; then
-              CONTENT=$(jq -Rs . < "$file")
-              echo "{\"filename\": \"$file\", \"content\": $CONTENT}," >> original_files_temp.json
-            fi
-          done
-          # Remove trailing comma on the last file entry and close JSON
-          sed -i '$ s/,$//' original_files_temp.json
+
+          if [ -n "$CHANGED_FILES" ]; then
+            CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -Ev "$CODE_REVIEW_FILE_EXCLUDE_REGEX" || true)
+          fi
+
+          if [ -n "$CHANGED_FILES" ]; then
+            for file in $CHANGED_FILES; do
+              if [ -f "$file" ]; then
+                CONTENT=$(jq -Rs . < "$file")
+                echo "{\"filename\": \"$file\", \"content\": $CONTENT}," >> original_files_temp.json
+              fi
+            done
+            # Remove trailing comma on the last file entry
+            sed -i '$ s/,$//' original_files_temp.json
+            echo "has_changed_files=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changed files found matching the specified paths." >&2
+            echo "has_changed_files=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Always close JSON array
           echo "]}" >> original_files_temp.json
 
       - name: Display processed diff
+        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
         run: cat original_files_temp.json
 
       - name: Get diff
+        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
         run: |
           # Parse filtered file paths from the JSON
           FILES_FROM_JSON=$(jq -r '."original files"[].filename' original_files_temp.json)
@@ -104,9 +121,11 @@ jobs:
           fi
 
       - name: Display Processed Diff (Debug)
+        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
         run: cat diff.json
 
       - name: Analyze with OpenAI
+        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
@@ -126,6 +145,7 @@ jobs:
             -d @request.json > response.json
 
       - name: Extract Review Message
+        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
         id: extract_message
         run: |
           ASSISTANT_MSG=$(jq -r '.choices[0].message.content' response.json)
@@ -137,6 +157,7 @@ jobs:
           echo $ASSISTANT_MSG
 
       - name: Post Comment to PR
+        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
         env:
           COMMENT: ${{ steps.extract_message.outputs.message }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
