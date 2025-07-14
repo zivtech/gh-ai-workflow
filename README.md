@@ -1,14 +1,4 @@
-# 🚀 GitHub Workflows
-
-This repository contains automated workflows used by Zivtech to improve engineering processes, code quality, and security.  
-**All workflows in this repository are documented in this README.** Please update this file when new workflows are added.
-
-> **Organization Variables:**  
-> All `OPENAI_*` variables and secrets are set at the organization level by default. Individual projects may override these settings if necessary.
-
----
-
-## 🤖🛡️ AI Code Quality & Security Check 
+## 🤖🛡️ GitHub Workflow for AI Code Quality & Security Check 
 
 This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) models to provide automated reviews of code changes for quality and security, posting AI-generated feedback directly on pull requests related to custom Drupal modules and themes.
 
@@ -202,7 +192,3 @@ Additional workflows should be added under `.github/workflows/` and documented i
 - **Required secrets/variables**
 - **How to use/customize**
 - **References, if applicable**
-
----
-
-*This documentation and configuration is intended for use within Zivtech. Update this README whenever adding or changing workflows to ensure consistency and clarity.*
