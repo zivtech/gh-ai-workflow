@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # Note: issues:write is required because GitHub's API treats PR comments as
+  # "issue comments" internally. This does NOT create GitHub Issues - all
+  # feedback is posted directly as PR comments.
   issues: write
 
 jobs:
