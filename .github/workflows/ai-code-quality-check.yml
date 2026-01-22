@@ -5,138 +5,137 @@ on:
     branches:
       - master
       - main
+      - dev
   issue_comment:
     types: [created]
 
 permissions:
   contents: read
   pull-requests: write
-  # Note: issues:write is required because GitHub's API treats PR comments as
-  # "issue comments" internally. This does NOT create GitHub Issues - all
-  # feedback is posted directly as PR comments.
   issues: write
 
 jobs:
-  AI-Quality-Security-Check:
+  # Automatic code review on every PR
+  code-review:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # Run on PR events, or on issue comments that mention @claude
-    if: |
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request &&
-       contains(github.event.comment.body, '@claude'))
-    env:
-      CODE_REVIEW_PATHS: ${{ vars.CODE_REVIEW_PATHS || 'web/modules/custom/ web/themes/custom/' }}
-      CODE_REVIEW_FILE_EXCLUDE_REGEX: ${{ vars.CODE_REVIEW_FILE_EXCLUDE_REGEX || '\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$|node_modules/|vendor/|dist/|build/' }}
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Claude Code Review
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Code Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          claude -p "
+          You are reviewing PR #$PR_NUMBER. Follow this process precisely to minimize false positives.
+
+          ## STEP 1: Check eligibility
+          Use \`gh pr view $PR_NUMBER\` to check if PR is draft or closed. If so, stop.
+
+          ## STEP 2: Gather context
+          - Get PR diff: \`gh pr diff $PR_NUMBER\`
+          - Get commits: \`git log origin/$BASE_REF...HEAD --oneline\`
+          - Read any CLAUDE.md files in modified directories
+          - Focus only on files in web/modules/custom/ and web/themes/custom/
+
+          ## STEP 3: Multi-angle review (find potential issues)
+          Review from these 5 perspectives, noting any potential issues:
+
+          A. **CLAUDE.md / Drupal Standards Compliance**
+             - 2-space indent, \`elseif\` not \`else if\`, trailing commas
+             - \`\\Drupal::\` with leading backslash in procedural code
+             - \`\$this->t()\` not \`t()\` in classes
+             - \`Html::escape()\` not \`htmlspecialchars()\`
+
+          B. **Obvious Bugs** (shallow scan of changes only)
+             - Logic errors, null checks, edge cases
+             - Focus on large bugs, not nitpicks
+
+          C. **Git History Context**
+             - Check \`git log\` and blame for relevant history
+             - Any patterns or past issues?
+
+          D. **Zivtech Commit Conventions**
+             - Format: \`TICKET-123: Description\`
+             - Imperative mood, capitalize first word
+
+          E. **Security** (critical)
+             - XSS, SQL injection, access control
+
+          ## STEP 4: Score each issue (CRITICAL - reduces false positives)
+          For EACH potential issue, score 0-100:
+
+          - 0: False positive, doesn't hold up to scrutiny, or pre-existing
+          - 25: Might be real, but can't verify. Stylistic issues not in CLAUDE.md
+          - 50: Real but nitpicky, not important relative to PR
+          - 75: Verified real, will impact functionality, or explicitly in CLAUDE.md
+          - 100: Definitely real, will happen frequently, evidence confirms
+
+          ## STEP 5: Filter
+          ONLY report issues scoring 75 or higher. Discard the rest.
+
+          ## FALSE POSITIVES TO IGNORE:
+          - Pre-existing issues (not introduced in this PR)
+          - Things a linter/typechecker would catch
+          - General quality issues unless in CLAUDE.md
+          - Changes in functionality that are likely intentional
+          - Issues on lines the user didn't modify
+
+          ## STEP 6: Post review
+          Use \`gh pr comment $PR_NUMBER --body \"<review>\"\`
+
+          Format (if issues found):
+          ---
+          ### Code Review
+
+          Found N issues:
+
+          1. <description> (reason: <CLAUDE.md says X / bug due to Y>)
+             <link to file:line>
+
+          ---
+          🤖 Generated with Claude Code
+
+          Format (if no issues):
+          ---
+          ### Code Review
+
+          No issues found. Checked for bugs, Drupal standards, and commit conventions.
+
+          🤖 Generated with Claude Code
+          ---
+          " \
+          --allowedTools "Bash(gh:*),Bash(git:*),Read,Glob,Grep" \
+          --max-turns 15
+
+  # Interactive @claude mentions
+  interactive-claude:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude Interactive Response
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          direct_prompt: |
-            You are an expert Drupal code reviewer. Review this pull request following these standards:
-
-            ## Files to Review
-            Focus on files in: ${{ env.CODE_REVIEW_PATHS }}
-            Exclude files matching: ${{ env.CODE_REVIEW_FILE_EXCLUDE_REGEX }}
-
-            ---
-            # DRUPAL CODING STANDARDS
-            Reference: https://project.pages.drupalcode.org/coding_standards/
-
-            ## PHP Standards
-            - 2-space indentation, never tabs
-            - No trailing whitespace, Unix line endings
-            - 80-character line maximum (with allowed exceptions)
-            - Always use curly braces for control structures
-            - Use `elseif`, NEVER `else if`
-            - Space between keyword and parenthesis: `if ($condition)`
-            - Short array syntax with trailing commas: `['item',]`
-            - Spaces around concatenation: `'Foo' . $bar`
-            - Single quotes by default, double for interpolation
-
-            ## Drupal-Specific PHP
-            - Leading backslash on `\Drupal::` calls in procedural code
-            - Use `$this->t()` instead of `t()` in classes
-            - Use `Html::escape()` NOT `htmlspecialchars()`
-            - Use `#type => 'processed_text'` NOT `check_markup()`
-            - Use `Entity::loadMultiple()` NOT `Entity::load()` in loops
-            - String keys for render array children (not numeric)
-            - Prefer dependency injection over static service calls
-
-            ## Security Checks
-            - Check for XSS vulnerabilities (unescaped output)
-            - Verify SQL queries use parameterized queries
-            - Check for proper access controls
-            - Validate user input before use
-            - Use `Url::fromUserInput()` for path validation
-
-            ## Twig Standards
-            - Use `|escape('html_attr')` for URLs and attributes
-            - Use `{{ 'String'|t }}` for translations
-            - Ensure accessible disclosure widgets (heading wraps button)
-            - Verify `aria-controls` matches controlled element `id`
-
-            ## JavaScript Standards
-            - Use `once()` in Drupal behaviors
-            - Use strict equality (`===` and `!==`)
-            - Use `let` or `const`, not `var`
-            - 2-space indentation
-
-            ## CSS/SCSS Standards
-            - 2-space indentation
-            - One selector per line
-
-            ---
-            # ZIVTECH GIT CONVENTIONS
-
-            ## Commit Message Format
-            Commits MUST include ticket number: `TICKET-123: Description`
-            - Ticket ID followed by colon and space
-            - Capitalize first word
-            - Use imperative mood ("Add" not "Added")
-            - First line under 72 characters
-
-            ## Branch Naming
-            Branches should follow: `TICKET-123/short-description`
-
-            ---
-            # REVIEW INSTRUCTIONS
-
-            1. **Check all commits** in this PR for proper ticket number formatting
-            2. **Review code changes** against Drupal coding standards
-            3. **Identify security issues** as HIGH priority
-            4. **Check accessibility** in Twig templates
-            5. **Suggest improvements** with specific code examples
-
-            ## Output Format
-            Structure your review as:
-
-            ### Summary
-            Brief overview of the changes and overall quality.
-
-            ### Commit Messages
-            ✅ or ❌ for each commit's format compliance.
-
-            ### Issues Found
-            List issues by severity:
-            - 🔴 **Critical**: Security vulnerabilities, data loss risks
-            - 🟠 **Warning**: Coding standard violations, potential bugs
-            - 🟡 **Suggestion**: Best practices, performance improvements
-
-            ### Code Examples
-            For each issue, show the problematic code and the suggested fix.
-
-            ### Accessibility
-            Note any accessibility concerns in templates.
-
-            ### Positive Feedback
-            Highlight well-written code following best practices.
           allowed_tools: "Bash,Read,Glob,Grep"
-          timeout_minutes: "15"
+          timeout_minutes: "10"
