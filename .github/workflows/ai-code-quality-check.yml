@@ -4,164 +4,136 @@ on:
   pull_request:
     branches:
       - master
+      - main
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   AI-Quality-Security-Check:
     runs-on: ubuntu-latest
+    # Run on PR events, or on issue comments that mention @claude
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       contains(github.event.comment.body, '@claude'))
     env:
-      CODE_REVIEW_PATHS: "web/modules/custom/* web/themes/custom/*"
-      CODE_REVIEW_FILE_EXCLUDE_REGEX: ${{ vars.CODE_REVIEW_FILE_EXCLUDE_REGEX }}
+      CODE_REVIEW_PATHS: ${{ vars.CODE_REVIEW_PATHS || 'web/modules/custom/ web/themes/custom/' }}
+      CODE_REVIEW_FILE_EXCLUDE_REGEX: ${{ vars.CODE_REVIEW_FILE_EXCLUDE_REGEX || '\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$|node_modules/|vendor/|dist/|build/' }}
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Ensure full history for proper diff
+          fetch-depth: 0
 
-      - name: Gather full code from changed files
-        id: gather_code
-        run: |
-          # ------------------------------------------------------------------------------
-          # Organization Variable Documentation
-          #
-          # This script/workflow relies on several organization-level GitHub Actions variables,
-          # each of which can be centrally defined (org-level) or overridden for individual repos
-          # by creating a repository variable of the same name.
-          #
-          # VARIABLES:
-          #
-          #   CODE_REVIEW_PATHS
-          #       - Space-separated list of glob patterns for directories/files to review.
-          #       - Default (org-level): "web/modules/custom/* web/themes/custom/*"
-          #       - To customize for a repository, add a repository variable named CODE_REVIEW_PATHS.
-          #
-          #   CODE_REVIEW_FILE_EXCLUDE_REGEX
-          #       - Pipe-separated (|) regular expression.
-          #       - Any matching file or directory will be excluded from review.
-          #       - Default (org-level) covers typical dependencies, build outputs, static and binary assets, etc.
-          #       - To override for a repo, add a repository variable of the same name.
-          #
-          #   OPENAI_CODE_REVIEW_PROMPT
-          #       - The main prompt text sent to the OpenAI model describing review expectations.
-          #       - Set at org level for consistency; override per repo as needed.
-          #
-          #   OPENAI_CODE_REVIEW_MODEL
-          #       - Specifies the OpenAI model to use (e.g., "gpt-4o", "gpt-4").
-          #       - Set at org level for consistency and management.
-          #
-          #   OPENAI_API_KEY
-          #       - (Secret) The API key for authenticating to the OpenAI service.
-          #       - Set as an org secret; override per repo for additional isolation or testing.
-          #
-          # OVERRIDING ORG VARIABLES:
-          #
-          #   To override any variable or secret for your project:
-          #     - Go to: your repo → Settings → Secrets and variables → Actions
-          #     - Add a new variable/secret with the SAME NAME as the org variable to override it.
-          #     - For details, see GitHub’s documentation:
-          #       https://docs.github.com/en/actions/learn-github-actions/variables
-          #
-          # This approach keeps common config centralized but supports per-repo customization.
-          # ------------------------------------------------------------------------------
-          #
-          # Get changed files, filtering out those that match the exclusion regex
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD $CODE_REVIEW_PATHS)
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          direct_prompt: |
+            You are an expert Drupal code reviewer. Review this pull request following these standards:
 
-          # Build a JSON array containing filenames and their content
-          echo '{"original files": [' > original_files_temp.json
+            ## Files to Review
+            Focus on files in: ${{ env.CODE_REVIEW_PATHS }}
+            Exclude files matching: ${{ env.CODE_REVIEW_FILE_EXCLUDE_REGEX }}
 
-          if [ -n "$CHANGED_FILES" ]; then
-            CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -Ev "$CODE_REVIEW_FILE_EXCLUDE_REGEX" || true)
-          fi
+            ---
+            # DRUPAL CODING STANDARDS
+            Reference: https://project.pages.drupalcode.org/coding_standards/
 
-          if [ -n "$CHANGED_FILES" ]; then
-            for file in $CHANGED_FILES; do
-              if [ -f "$file" ]; then
-                CONTENT=$(jq -Rs . < "$file")
-                echo "{\"filename\": \"$file\", \"content\": $CONTENT}," >> original_files_temp.json
-              fi
-            done
-            # Remove trailing comma on the last file entry
-            sed -i '$ s/,$//' original_files_temp.json
-            echo "has_changed_files=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No changed files found matching the specified paths." >&2
-            echo "has_changed_files=false" >> "$GITHUB_OUTPUT"
-          fi
+            ## PHP Standards
+            - 2-space indentation, never tabs
+            - No trailing whitespace, Unix line endings
+            - 80-character line maximum (with allowed exceptions)
+            - Always use curly braces for control structures
+            - Use `elseif`, NEVER `else if`
+            - Space between keyword and parenthesis: `if ($condition)`
+            - Short array syntax with trailing commas: `['item',]`
+            - Spaces around concatenation: `'Foo' . $bar`
+            - Single quotes by default, double for interpolation
 
-          # Always close JSON array
-          echo "]}" >> original_files_temp.json
+            ## Drupal-Specific PHP
+            - Leading backslash on `\Drupal::` calls in procedural code
+            - Use `$this->t()` instead of `t()` in classes
+            - Use `Html::escape()` NOT `htmlspecialchars()`
+            - Use `#type => 'processed_text'` NOT `check_markup()`
+            - Use `Entity::loadMultiple()` NOT `Entity::load()` in loops
+            - String keys for render array children (not numeric)
+            - Prefer dependency injection over static service calls
 
-      - name: Display processed diff
-        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
-        run: cat original_files_temp.json
+            ## Security Checks
+            - Check for XSS vulnerabilities (unescaped output)
+            - Verify SQL queries use parameterized queries
+            - Check for proper access controls
+            - Validate user input before use
+            - Use `Url::fromUserInput()` for path validation
 
-      - name: Get diff
-        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
-        run: |
-          # Parse filtered file paths from the JSON
-          FILES_FROM_JSON=$(jq -r '."original files"[].filename' original_files_temp.json)
+            ## Twig Standards
+            - Use `|escape('html_attr')` for URLs and attributes
+            - Use `{{ 'String'|t }}` for translations
+            - Ensure accessible disclosure widgets (heading wraps button)
+            - Verify `aria-controls` matches controlled element `id`
 
-          # Generate the diff for only these files
-          if [ -n "$FILES_FROM_JSON" ]; then
-            git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- $FILES_FROM_JSON \
-              | grep '^[+-]' | grep -Ev '^(---|\+\+\+)' > code_changes_only.txt
-          else
-            echo '' > code_changes_only.txt
-          fi
+            ## JavaScript Standards
+            - Use `once()` in Drupal behaviors
+            - Use strict equality (`===` and `!==`)
+            - Use `let` or `const`, not `var`
+            - 2-space indentation
 
-          jq -Rs '{diff: .}' code_changes_only.txt > diff.json
+            ## CSS/SCSS Standards
+            - 2-space indentation
+            - One selector per line
 
-          if [ -f original_files_temp.json ]; then
-            jq -s '.[0] * .[1]' diff.json original_files_temp.json > combined.json
-            mv combined.json diff.json
-          fi
+            ---
+            # ZIVTECH GIT CONVENTIONS
 
-      - name: Display Processed Diff (Debug)
-        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
-        run: cat diff.json
+            ## Commit Message Format
+            Commits MUST include ticket number: `TICKET-123: Description`
+            - Ticket ID followed by colon and space
+            - Capitalize first word
+            - Use imperative mood ("Add" not "Added")
+            - First line under 72 characters
 
-      - name: Analyze with OpenAI
-        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          DIFF_CONTENT=$(jq -r '.diff' diff.json)
-          ORIGINAL_FILES=$(jq -r '."original files"' diff.json)
-          PROMPT="${{ vars.OPENAI_CODE_REVIEW_PROMPT }}:\n\nDIFF:\n${DIFF_CONTENT}\n\nORIGINAL FILES:\n${ORIGINAL_FILES}"
-          jq -n --arg prompt "$PROMPT" --arg model "${{ vars.OPENAI_CODE_REVIEW_MODEL }}" '{
-            "model": $model,
-            "messages": [
-              { "role": "system", "content": "You are an expert Drupal code reviewer." },
-              { "role": "user", "content": $prompt }
-            ]
-          }' > request.json
-          curl -sS https://api.openai.com/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-            -d @request.json > response.json
+            ## Branch Naming
+            Branches should follow: `TICKET-123/short-description`
 
-      - name: Extract Review Message
-        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
-        id: extract_message
-        run: |
-          ASSISTANT_MSG=$(jq -r '.choices[0].message.content' response.json)
-          {
-            echo "message<<EOF"
-            echo "$ASSISTANT_MSG"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-          echo $ASSISTANT_MSG
+            ---
+            # REVIEW INSTRUCTIONS
 
-      - name: Post Comment to PR
-        if: ${{ steps.gather_code.outputs.has_changed_files == 'true' }}
-        env:
-          COMMENT: ${{ steps.extract_message.outputs.message }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api \
-            repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            -f body="$COMMENT"
+            1. **Check all commits** in this PR for proper ticket number formatting
+            2. **Review code changes** against Drupal coding standards
+            3. **Identify security issues** as HIGH priority
+            4. **Check accessibility** in Twig templates
+            5. **Suggest improvements** with specific code examples
+
+            ## Output Format
+            Structure your review as:
+
+            ### Summary
+            Brief overview of the changes and overall quality.
+
+            ### Commit Messages
+            ✅ or ❌ for each commit's format compliance.
+
+            ### Issues Found
+            List issues by severity:
+            - 🔴 **Critical**: Security vulnerabilities, data loss risks
+            - 🟠 **Warning**: Coding standard violations, potential bugs
+            - 🟡 **Suggestion**: Best practices, performance improvements
+
+            ### Code Examples
+            For each issue, show the problematic code and the suggested fix.
+
+            ### Accessibility
+            Note any accessibility concerns in templates.
+
+            ### Positive Feedback
+            Highlight well-written code following best practices.
+          allowed_tools: "Bash,Read,Glob,Grep"
+          timeout_minutes: "15"

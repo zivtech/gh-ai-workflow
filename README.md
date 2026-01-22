@@ -1,182 +1,197 @@
-## 🤖🛡️ GitHub Workflow for AI Code Quality & Security Check 
+## 🤖🛡️ GitHub Workflow for AI Code Quality & Security Check
 
-This workflow uses [OpenAI](https://platform.openai.com/docs/api-reference) models to provide automated reviews of code changes for quality and security, posting AI-generated feedback directly on pull requests related to custom Drupal modules and themes.
+This workflow uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via the official [Claude Code GitHub Action](https://github.com/anthropics/claude-code-action) to provide automated reviews of code changes for quality and security, posting AI-generated feedback directly on pull requests.
+
+### ✨ Features
+
+- **Drupal Coding Standards** - Enforces official Drupal coding standards from drupal.org
+- **Zivtech Git Conventions** - Validates commit messages and branch naming
+- **Security Analysis** - Identifies XSS, SQL injection, and access control issues
+- **Accessibility Checks** - Reviews Twig templates for WCAG compliance
+- **Interactive Mode** - Mention `@claude` in PR comments to ask follow-up questions
 
 ### Workflow Overview
 
-- **Trigger:** Pull requests whose base (target) branch is the defined **trunk branch** (default: `master`).
-- **Analyzes:** Source code in `web/modules/custom/*` and `web/themes/custom/*`.
-- **Excludes:** Noise files such as dependencies, images, binaries, archives, VCS metadata, and generated assets.
-- **Feedback:** Posts the OpenAI analysis as a PR comment for team review.
+- **Trigger:** Pull requests targeting `master` or `main`, or `@claude` mentions in PR comments
+- **Analyzes:** Source code in `web/modules/custom/` and `web/themes/custom/` (configurable)
+- **Excludes:** Dependencies, images, binaries, build outputs, and vendor code
+- **Feedback:** Posts structured review comments with severity levels and code examples
 
 ---
 
 ### 📝 How to Add This Workflow to a Repository
 
 1. **📄 Copy the Workflow**
-    - Copy the contents of [.github/workflows/ai-code-quality-check.yml](.github/workflows/ai-code-quality-check.yml).
-    - Save the YAML file as `.github/workflows/ai-code-quality-check.yml`.
+    - Copy [.github/workflows/ai-code-quality-check.yml](.github/workflows/ai-code-quality-check.yml)
+    - Save as `.github/workflows/ai-code-quality-check.yml` in your repository
 
-2. **🔒🏷️ Set Up Secrets & Variables**
-    - `OPENAI_API_KEY`, `OPENAI_CODE_REVIEW_PROMPT`, `OPENAI_CODE_REVIEW_MODEL`, and `CODE_REVIEW_FILE_EXCLUDE_REGEX` are **already configured organization-wide**.
-    - You may override them for your repository in **Settings → Secrets and variables → Actions**.
+2. **🔒 Set Up the API Key**
+    - Add `ANTHROPIC_API_KEY` as an organization or repository secret
+    - Get your API key from [console.anthropic.com](https://console.anthropic.com)
+    - Go to **Settings → Secrets and variables → Actions → New repository secret**
 
 3. **✅ Test the Workflow**
-    - Open or update a PR targeting the configured trunk branch.
-    - The AI-powered review runs automatically.
+    - Open or update a PR targeting `master` or `main`
+    - The AI-powered review runs automatically
+    - Mention `@claude` in a PR comment for interactive follow-ups
 
 ---
 
-### 🌳 Supported Trunk Branches (How to Specify PR Targets)
+### 🌳 Supported Trunk Branches
 
-By **default**, this workflow only runs on PRs where the target (base) branch is `master`.
+By default, this workflow runs on PRs targeting `master` or `main`:
 
 ```yaml
 on:
   pull_request:
     branches:
       - master
+      - main
+  issue_comment:
+    types: [created]
 ```
 
 #### Changing the Trunk Branch
 
-If your repository’s trunk branch is named something other than `master` (such as `main`, `develop`, or another convention), update the `branches` list under the `pull_request` trigger in your workflow YAML:
-
-**For a different single trunk (e.g. `main`):**
+Update the `branches` list in your workflow YAML:
 
 ```yaml
 on:
   pull_request:
     branches:
-      - main
-```
-
-**For multiple trunks:**
-
-```yaml
-on:
-  pull_request:
-    branches:
-      - main
       - develop
+      - staging
 ```
-
-- Only PRs targeting one of the specified trunks will trigger the review.
-- Edit this in `.github/workflows/ai-code-quality.yml` under `on.pull_request.branches`.
-- Commit and push the update for changes to take effect.
 
 ---
+
 ### 🌐 Customizing Reviewed Paths
 
-By default, this workflow analyzes code changes in the following locations:
+By default, this workflow analyzes code in:
+- `web/modules/custom/` (custom Drupal modules)
+- `web/themes/custom/` (custom Drupal themes)
 
-- `web/modules/custom/*` (custom modules)
-- `web/themes/custom/*` (custom themes)
+#### Override via Repository Variable
 
-These paths are set using the environment variable:
+Set `CODE_REVIEW_PATHS` in **Settings → Secrets and variables → Actions → Variables**:
 
-```yaml
-env:
-  CODE_REVIEW_PATHS: "web/modules/custom/* web/themes/custom/*"
+```
+src/ custom/plugins/ lib/
 ```
 
-#### 🔀 How to Customize
-
-To review code in different directories or files, **override `CODE_REVIEW_PATHS`** in your workflow YAML.  
-For example:
-
-```yaml
-env:
-  CODE_REVIEW_PATHS: "src/* custom/plugins/*"
-```
-
-You can include multiple patterns separated by spaces.
-
-#### 📝 Example Override
-
-To review only `src/` and all PHP files in `extensions/`:
-
-```yaml
-env:
-  CODE_REVIEW_PATHS: "src/* extensions/*.php"
-```
-
-#### 💡 Tip
-
-Set `CODE_REVIEW_PATHS` to match where your project's custom or main code lives.  
-This keeps automated reviews targeted and reduces noise from dependencies and vendor code.
+Multiple paths are space-separated.
 
 ---
 
-### 🏷️🔒 Variables & Secrets 
+### 📦 Excluded Files
 
-This workflow relies on several [GitHub Actions organization-level variables](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows) for consistent configuration across all repositories.  
-**Any of these can be overridden per repository** by adding a [repository variable of the same name](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables#creating-configuration-variables-for-a-repository).
+Set `CODE_REVIEW_FILE_EXCLUDE_REGEX` to exclude files from review. Default excludes:
+- Images: `*.png`, `*.jpg`, `*.gif`, `*.svg`, `*.ico`
+- Fonts: `*.woff`, `*.woff2`, `*.ttf`, `*.eot`
+- Directories: `node_modules/`, `vendor/`, `dist/`, `build/`
 
-> 🔗 [Learn how to define and manage variables in GitHub Actions (official docs)](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables)
+Override by setting the variable at the repository level.
 
-| Name                              | Set at                 | Description                                                                                                                                      |
-|-----------------------------------|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| `OPENAI_API_KEY`                  | Org Secret             | [OpenAI API key](https://platform.openai.com/account/api-keys)                                                                                   |
-| `OPENAI_CODE_REVIEW_PROMPT`       | Org Variable           | Prompt for code reviews sent to OpenAI                                                                                                           |
-| `OPENAI_CODE_REVIEW_MODEL`        | Org Variable           | OpenAI model name (e.g. `gpt-4o`, `gpt-4`). Check out [Models](https://platform.openai.com/docs/models) to compare the various available models. |
-| `CODE_REVIEW_FILE_EXCLUDE_REGEX`  | Org Variable           | Pipe-separated regex: any match is excluded from review                                                                                          |
-
-By default, **no further action is needed**, but you can override any of these variables (or secrets) for a particular repository:
-- Go to **Settings → Secrets and variables → Actions**
-- Add a new variable (or secret), using the **exact same name** as the organization variable to override it
-
-For more, see [GitHub’s documentation on defining configuration variables](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/store-information-in-variables).
-
-> **🔒💡 Security Note:**  
-> For security best practices, ensure your `OPENAI_API_KEY` is created with strictly limited permissions—**it should only have "Write" access for Model capabilities** (used to chat/completions endpoints). Do not grant broader permissions that your workflow does not require.
 ---
 
-### 📦 Excluded Files & Folders
+### 🏷️🔒 Variables & Secrets
 
-The workflow ignores files and directories not relevant to code review, as defined by the **organization variable** `CODE_REVIEW_FILE_EXCLUDE_REGEX`.  
-This variable contains a regular expression that matches all file patterns to exclude.
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Secret | ✅ Yes | [Anthropic API key](https://console.anthropic.com) |
+| `CODE_REVIEW_PATHS` | Variable | No | Space-separated paths to review (default: `web/modules/custom/ web/themes/custom/`) |
+| `CODE_REVIEW_FILE_EXCLUDE_REGEX` | Variable | No | Regex pattern for files to exclude |
 
-**[See the Variables & Secrets section for instructions and examples on how to override this variable at the repository level.](#variables--secrets)**
+#### Migration from OpenAI
 
-By default, the following are excluded:
-- `vendor/`, `node_modules/`, `bower_components/` (dependencies)
-- `dist/`, `build/`, `out/` (build outputs)
-- `.git/`, `.github/`, `.gitlab/`, `.circleci/` (VCS metadata)
-- `coverage/`, `reports/` (coverage, reports)
-- Binaries, archives: (`*.zip`, `*.tar`, `*.exe`, `*.dll`, etc.)
-- Images, media, fonts
-- Office files: (`*.pdf`, `*.docx`, etc.)
-- Minified/generated files: (`*.min.js`, `*.pyc`, `*.map`)
-- OS/config files: (`.env`, `.DS_Store`, `Thumbs.db`)
-- Lockfiles and manifests (e.g. `composer.lock`)
+If migrating from the previous OpenAI-based workflow:
+- Replace `OPENAI_API_KEY` with `ANTHROPIC_API_KEY`
+- Remove `OPENAI_CODE_REVIEW_PROMPT` and `OPENAI_CODE_REVIEW_MODEL` (no longer needed)
+- Keep `CODE_REVIEW_PATHS` and `CODE_REVIEW_FILE_EXCLUDE_REGEX` (still supported)
 
-**Example:**  
-To exclude all `.test.js` files and the `sandbox/` directory (in addition to the org defaults), add or override the variable in your repository:
+---
 
-```text
-\.test\.js$|sandbox/|<org default regex goes here>
+### 💬 Interactive Mode
+
+Mention `@claude` in any PR comment to interact with the AI reviewer:
+
+```
+@claude Can you explain the security concern in more detail?
 ```
 
-Replace `<org default regex goes here>` with the default organization regex, or list only your overrides if you want just your patterns.
+```
+@claude What's the best practice for caching this entity query?
+```
+
+The workflow responds directly in the PR conversation.
 
 ---
 
-### 🧰 Workflow Process
+### 📋 Review Output Format
 
-1. **Checkout repo** using [actions/checkout](https://github.com/actions/checkout) with full git history for accurate diffs.
-2. **Identify changed files** in the supported directories.
-3. **Filter** files using comprehensive exclusion logic.
-4. **Bundle diff and content** as JSON.
-5. **Send to OpenAI** according to org prompt/model settings.
-6. **Post** the review comment back on the pull request using [GitHub CLI](https://cli.github.com/).
+Claude structures reviews with:
+
+| Section | Description |
+|---------|-------------|
+| **Summary** | Overview of changes and quality assessment |
+| **Commit Messages** | ✅/❌ validation against Zivtech conventions |
+| **Issues Found** | Categorized by severity (🔴 Critical, 🟠 Warning, 🟡 Suggestion) |
+| **Code Examples** | Before/after snippets for each issue |
+| **Accessibility** | WCAG concerns in Twig templates |
+| **Positive Feedback** | Recognition of well-written code |
+
+---
+
+### 🔍 What Gets Reviewed
+
+#### Drupal Coding Standards
+- PHP formatting (2-space indent, `elseif`, trailing commas)
+- Drupal-specific patterns (`\Drupal::`, `$this->t()`, render arrays)
+- Security best practices (`Html::escape()`, parameterized queries)
+
+#### Zivtech Git Conventions
+- Commit message format: `TICKET-123: Description`
+- Branch naming: `TICKET-123/short-description`
+- Imperative mood, proper capitalization
+
+#### Accessibility (WCAG)
+- Disclosure widget patterns (heading wraps button)
+- `aria-controls` / `id` pairing
+- Proper escaping in Twig templates
+
+---
+
+### 🧰 How It Works
+
+1. **Checkout** - Full git history for accurate diff analysis
+2. **Claude Code Action** - Invokes Claude with Drupal + Zivtech standards
+3. **Code Analysis** - Claude reads files, analyzes changes, checks commits
+4. **Structured Review** - Posts formatted feedback as PR comment
+
+Unlike the previous workflow, Claude Code can:
+- Read related files for context (not just the diff)
+- Understand the full codebase architecture
+- Provide interactive follow-up responses
+
+---
+
+### 🔄 Comparison: Previous vs New Workflow
+
+| Feature | OpenAI (Previous) | Claude Code (New) |
+|---------|-------------------|-------------------|
+| Lines of YAML | ~170 | ~140 |
+| Interactive mode | ❌ | ✅ `@claude` mentions |
+| Context awareness | Diff + changed files only | Full repo access |
+| Custom prompts | Via org variable | Embedded in workflow |
+| File exploration | ❌ | ✅ Can read related files |
+| Tool access | ❌ | ✅ Bash, Glob, Grep, Read |
 
 ---
 
 ### ℹ️ References
 
+- [Claude Code GitHub Action](https://github.com/anthropics/claude-code-action)
+- [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code)
+- [Anthropic Console](https://console.anthropic.com) (API keys)
+- [Drupal Coding Standards](https://project.pages.drupalcode.org/coding_standards/)
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [GitHub Actions Variables](https://docs.github.com/en/actions/learn-github-actions/variables)
-- [GitHub Actions Secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets)
-- [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
-- [Workflow Triggers](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request)
