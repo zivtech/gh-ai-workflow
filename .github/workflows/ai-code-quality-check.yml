@@ -2,12 +2,17 @@ name: AI Code Quality and Security Check
 
 on:
   pull_request:
+    types: [opened, synchronize]
     branches:
       - master
       - main
       - dev
   issue_comment:
     types: [created]
+
+concurrency:
+  group: code-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -19,6 +24,7 @@ jobs:
   code-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,97 +43,180 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           claude -p "
-          You are reviewing PR #$PR_NUMBER. Follow this process precisely to minimize false positives.
+          Review PR #$PR_NUMBER for bugs, security issues, and coding standards.
 
-          ## STEP 1: Check eligibility
-          Use \`gh pr view $PR_NUMBER\` to check if PR is draft or closed. If so, stop.
+          ## CRITICAL: Scope of review
+          - You MAY read full files, browse the codebase, and examine surrounding code to understand context
+          - REPORT issues ONLY on lines added/modified in this PR (lines with \`+\` prefix in diff)
+          - DO NOT report issues on pre-existing code that wasn't changed in this PR
 
-          ## STEP 2: Gather context
-          - Get PR diff: \`gh pr diff $PR_NUMBER\`
-          - Get commits: \`git log origin/$BASE_REF...HEAD --oneline\`
+          ## STEP 1: Gather context
+          - Check PR state: \`gh pr view $PR_NUMBER --json state -q '.state'\`
+            - If CLOSED or MERGED: post \"### Code Review\\n\\nPR is [state], skipping review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
+          - Get diff: \`gh pr diff $PR_NUMBER\`
+            - If empty (0 lines or only whitespace): post \"### Code Review\\n\\nNo code changes to review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
+          - Check diff size: \`gh pr diff $PR_NUMBER | wc -l\`
+            - If > 1500 lines: use large PR format (security only)
+          - Get commits: \`gh pr view $PR_NUMBER --json commits -q '.commits[].messageHeadline'\`
           - Read any CLAUDE.md files in modified directories
-          - Focus only on files in web/modules/custom/ and web/themes/custom/
+          - Check for .claude/skills/drupal-coding-standards/SKILL.md - if exists, read it for detailed standards
+          - Detect project type from files:
+            - Drupal: composer.json with drupal/core, *.module files, web/sites/default
+            - JS/Node: package.json without Drupal
+            - Generic PHP: composer.json without Drupal, or standalone *.php files
 
-          ## STEP 3: Multi-angle review (find potential issues)
-          Review from these 5 perspectives, noting any potential issues:
+          ## STEP 2: What to check (ONLY in added/changed lines)
 
-          A. **CLAUDE.md / Drupal Standards Compliance**
-             - 2-space indent, \`elseif\` not \`else if\`, trailing commas
-             - \`\\Drupal::\` with leading backslash in procedural code
-             - \`\$this->t()\` not \`t()\` in classes
-             - \`Html::escape()\` not \`htmlspecialchars()\`
+          ### 🔒 SECURITY
+          - XSS: unescaped user input in output
+          - SQL injection: non-parameterized queries
+          - Access control: missing permission checks
+          - Hard-coded credentials, API keys, or secrets
+          - Sensitive data in logs or error messages
+          - Insecure deserialization
 
-          B. **Obvious Bugs** (shallow scan of changes only)
-             - Logic errors, null checks, edge cases
-             - Focus on large bugs, not nitpicks
+          ### ⚡ PERFORMANCE
+          - N+1 queries: loading in loops vs batch loading
+          - Missing caching on expensive operations
+          - Inefficient loops or unnecessary iterations
+          - Missing pagination on large data sets
 
-          C. **Git History Context**
-             - Check \`git log\` and blame for relevant history
-             - Any patterns or past issues?
+          ### 🔧 MAINTAINABILITY
+          - Prefer dependency injection over static/global access
+          - Magic numbers/strings → use constants
+          - Missing or inadequate error handling
+          - Overly complex functions (split them)
+          - Dead code or unreachable branches
+          - Missing type hints
 
-          D. **Zivtech Commit Conventions**
-             - Format: \`TICKET-123: Description\`
-             - Imperative mood, capitalize first word
+          ### 🔍 FUNCTIONALITY
+          - Null/empty checks before operations
+          - Edge cases (empty arrays, null, zero)
+          - Logic errors in conditionals
+          - Missing input validation
+          - Off-by-one errors
 
-          E. **Security** (critical)
-             - XSS, SQL injection, access control
+          ### 🟨 JAVASCRIPT (*.js, *.ts, *.jsx, *.tsx, *.vue)
+          Security:
+          - No \`eval()\`, \`new Function()\`, or \`innerHTML\` with unsanitized input
+          - No \`document.write()\`
+          Maintainability:
+          - Use \`const\`/\`let\`, not \`var\`
+          - Use \`===\` not \`==\`
+          - Remove \`console.log\`/\`debugger\` statements
+          - Async functions need error handling (try/catch or .catch())
+          Performance:
+          - Cache DOM queries outside loops
+          - Clean up event listeners (removeEventListener or AbortController)
 
-          ## STEP 4: Score each issue (CRITICAL - reduces false positives)
-          For EACH potential issue, score 0-100:
+          ### 🎨 CSS (*.css, *.scss, *.less)
+          - Avoid \`!important\` (except utility classes)
+          - Use CSS custom properties for repeated values (colors, spacing)
+          - Keep selector specificity low
+          - No \`*\` selector in production code
 
-          - 0: False positive, doesn't hold up to scrutiny, or pre-existing
-          - 25: Might be real, but can't verify. Stylistic issues not in CLAUDE.md
-          - 50: Real but nitpicky, not important relative to PR
-          - 75: Verified real, will impact functionality, or explicitly in CLAUDE.md
-          - 100: Definitely real, will happen frequently, evidence confirms
+          ### ♿ ACCESSIBILITY (HTML/Twig templates)
+          - Images need \`alt\` attributes (empty \`alt=\"\"\` for decorative)
+          - Form inputs need associated \`<label>\` elements
+          - \`target=\"_blank\"\` links need \`rel=\"noopener noreferrer\"\`
+          - Headings follow hierarchy (h1 → h2 → h3, no skipping)
+          - Interactive elements need accessible names
 
-          ## STEP 5: Filter
-          ONLY report issues scoring 75 or higher. Discard the rest.
+          ### 🐘 DRUPAL-SPECIFIC (apply if Drupal detected in STEP 1)
+          If .claude/skills/drupal-coding-standards/ exists, read SKILL.md for full standards.
+          Quick reference:
+          - \`\\Drupal::\` needs leading backslash in procedural code
+          - Use \`\$this->t()\` not \`t()\` in classes; \`Html::escape()\` not \`htmlspecialchars()\`
+          - Use \`Entity::loadMultiple()\` not \`Entity::load()\` in loops
+          - Use \`Url::fromUserInput()\` for user-supplied paths
+          - Use \`elseif\` not \`else if\`; trailing commas in arrays
+          - Twig: \`|escape('html_attr')\` for attributes, \`{{ 'text'|t }}\`
+          - JS: Use \`once()\` in Drupal.behaviors, \`'use strict'\`
+          - Ref: https://project.pages.drupalcode.org/coding_standards/
 
-          ## FALSE POSITIVES TO IGNORE:
-          - Pre-existing issues (not introduced in this PR)
-          - Things a linter/typechecker would catch
-          - General quality issues unless in CLAUDE.md
-          - Changes in functionality that are likely intentional
-          - Issues on lines the user didn't modify
+          ### 📝 PR TITLE & COMMITS (Zivtech convention)
+          - Format: \`TICKET-123: Description\` (imperative mood, capitalized)
+          - Check both PR title AND individual commit messages
+          - Missing ticket entirely = score 75 (🟠 Warning)
+          - Minor format issues (case, mood, punctuation) = score 50 (discard)
 
-          ## STEP 6: Post review
-          Use \`gh pr comment $PR_NUMBER --body \"<review>\"\`
+          ## STEP 3: Score and classify each issue
+          **Score (determines if reported):**
+          - 0-49: DISCARD (existing code, nitpicks, or minor issues)
+          - 50-74: DISCARD (real but minor, not worth flagging)
+          - 75-89: REPORT as 🟠 Warning
+          - 90-100: REPORT as 🔴 Critical (security, data loss, crashes)
 
-          Format (if issues found):
-          ---
+          Before reporting ANY issue, verify the line appears with a \`+\` prefix in the diff.
+
+          ## STEP 4: Post review
+          Check for your existing review: \`gh pr view $PR_NUMBER --json comments -q '.comments[] | select(.author.login==\"github-actions\") | .body' | grep \"Generated with Claude\"\`
+          - If output contains match: update with \`gh pr comment $PR_NUMBER --edit-last --body \"<review>\"\`
+          - If no output: create new with \`gh pr comment $PR_NUMBER --body \"<review>\"\`
+
+          **Output format:**
+          \`\`\`
           ### Code Review
 
-          Found N issues:
+          **PR Title:** ✅ TICKET-123: Add feature | ❌ \"fixed stuff\" (missing ticket)
+          **Commits:** ✅ All follow convention | ❌ \"fixed stuff\" (missing ticket)
 
-          1. <description> (reason: <CLAUDE.md says X / bug due to Y>)
-             <link to file:line>
+          **🔒 Security:** None found
+          **⚡ Performance:** None found
+          **🔧 Maintainability:** None found
+          **🔍 Functionality:** None found
+
+          ✨ Positive observation (always include one!)
 
           ---
           🤖 Generated with Claude Code
+          \`\`\`
 
-          Format (if no issues):
+          **When listing issues, use this format:**
+          - 🔴/🟠 **Title** - Description. \`bad code\` → \`fix\`. [file:line](link)
+
+          **Severity (from STEP 3 scoring):**
+          - 🔴 Critical (90-100): Security holes, data loss, crashes
+          - 🟠 Warning (75-89): Bugs, standards violations, performance issues
+
+          **For large PRs (>1500 lines), use this format instead:**
+          \`\`\`
+          ### Code Review ⚠️ Large PR
+
+          This PR has X lines changed. Reviewing security and metadata only.
+
+          **PR Title:** ✅ or ❌
+          **Commits:** ✅ or ❌
+
+          **🔒 Security:** [issues or None found]
+          **⚡ Performance:** Skipped (large PR)
+          **🔧 Maintainability:** Skipped (large PR)
+          **🔍 Functionality:** Skipped (large PR)
+
+          ✨ Positive observation
+
+          Consider breaking large PRs into smaller, focused changes.
+
           ---
-          ### Code Review
-
-          No issues found. Checked for bugs, Drupal standards, and commit conventions.
-
           🤖 Generated with Claude Code
-          ---
+          \`\`\`
+
+          If no issues in a category, show \"None found\".
           " \
           --allowedTools "Bash(gh:*),Bash(git:*),Read,Glob,Grep" \
           --max-turns 15
 
   # Interactive @claude mentions
+  # Note: Broader Bash access allowed here for interactive flexibility
   interactive-claude:
     if: |
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -139,3 +228,5 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           allowed_tools: "Bash,Read,Glob,Grep"
           timeout_minutes: "10"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
