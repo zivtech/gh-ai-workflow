@@ -44,9 +44,38 @@ Inspired by Claude Code's code-review skill, the workflow:
 
 1. **Copy the workflow** to `.github/workflows/ai-code-quality-check.yml`
 
-2. **Add `ANTHROPIC_API_KEY`** as a repository or org secret
+2. **Add secrets** as repository or org secrets:
+   - `ANTHROPIC_API_KEY` - Your Anthropic API key
+   - `ZIVTECH_SKILLS_DEPLOY_KEY` - SSH deploy key for `zivtech/zivtech-claude-skills` (read access)
 
-3. **Test** - Open a PR targeting `master` or `main`
+3. **Create the deploy key** (one-time setup):
+   ```bash
+   # Generate a new SSH key pair
+   ssh-keygen -t ed25519 -f zivtech-skills-deploy -N "" -C "zivtech-skills-deploy-key"
+
+   # Add the PUBLIC key to zivtech/zivtech-claude-skills as a deploy key
+   # GitHub → zivtech-claude-skills → Settings → Deploy keys → Add
+
+   # Add the PRIVATE key as a secret to your org/repo
+   # GitHub → Your Repo → Settings → Secrets → ZIVTECH_SKILLS_DEPLOY_KEY
+   cat zivtech-skills-deploy  # Copy this as the secret value
+   ```
+
+4. **Test** - Open a PR targeting `master` or `main`
+
+---
+
+### 🎯 Installed Skills
+
+The workflow automatically installs these Claude skills:
+
+| Skill | Source | Purpose |
+|-------|--------|---------|
+| **drupal-coding-standards** | `zivtech/zivtech-claude-skills` | Drupal PHP, Twig, JS, CSS standards |
+| **zivtech-development-workflow** | `zivtech/zivtech-claude-skills` | Git branch/commit conventions |
+| **drupal-security** | `madsnorgaard/agent-resources` | Security vulnerability checks |
+
+Skills are read from `~/.claude/skills/` during each review.
 
 ---
 

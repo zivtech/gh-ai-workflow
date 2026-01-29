@@ -38,6 +38,34 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Install Zivtech Skills
+        env:
+          SKILLS_DEPLOY_KEY: ${{ secrets.ZIVTECH_SKILLS_DEPLOY_KEY }}
+        run: |
+          # Set up SSH for private repo access
+          mkdir -p ~/.ssh
+          echo "$SKILLS_DEPLOY_KEY" > ~/.ssh/skills_deploy_key
+          chmod 600 ~/.ssh/skills_deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          # Clone private skills repo
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/skills_deploy_key -o StrictHostKeyChecking=no" \
+            git clone --depth 1 git@github.com:zivtech/zivtech-claude-skills.git /tmp/zivtech-skills
+
+          # Install Zivtech skills to Claude's skills directory
+          mkdir -p ~/.claude/skills
+          cp -r /tmp/zivtech-skills/.claude/skills/drupal-coding-standards ~/.claude/skills/
+          cp -r /tmp/zivtech-skills/.claude/skills/zivtech-development-workflow ~/.claude/skills/
+
+          # Install third-party drupal-security skill
+          npx skills add madsnorgaard/agent-resources@drupal-security -g -y
+
+          # Clean up
+          rm -rf /tmp/zivtech-skills ~/.ssh/skills_deploy_key
+
+          echo "✓ Skills installed:"
+          ls -la ~/.claude/skills/
+
       - name: Run Code Review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -61,7 +89,9 @@ jobs:
             - If > 1500 lines: use large PR format (security only)
           - Get commits: \`gh pr view $PR_NUMBER --json commits -q '.commits[].messageHeadline'\`
           - Read any CLAUDE.md files in modified directories
-          - Check for .claude/skills/drupal-coding-standards/SKILL.md - if exists, read it for detailed standards
+          - Read ~/.claude/skills/drupal-coding-standards/SKILL.md for Drupal coding standards
+          - Read ~/.claude/skills/zivtech-development-workflow/SKILL.md for Git commit conventions
+          - Read ~/.claude/skills/drupal-security/SKILL.md for security best practices
           - Detect project type from files:
             - Drupal: composer.json with drupal/core, *.module files, web/sites/default
             - JS/Node: package.json without Drupal
@@ -125,7 +155,8 @@ jobs:
           - Interactive elements need accessible names
 
           ### 🐘 DRUPAL-SPECIFIC (apply if Drupal detected in STEP 1)
-          If .claude/skills/drupal-coding-standards/ exists, read SKILL.md for full standards.
+          Reference ~/.claude/skills/drupal-coding-standards/SKILL.md for full Drupal coding standards.
+          Reference ~/.claude/skills/drupal-security/SKILL.md for security checks.
           Quick reference:
           - \`\\Drupal::\` needs leading backslash in procedural code
           - Use \`\$this->t()\` not \`t()\` in classes; \`Html::escape()\` not \`htmlspecialchars()\`
@@ -221,6 +252,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install Zivtech Skills
+        env:
+          SKILLS_DEPLOY_KEY: ${{ secrets.ZIVTECH_SKILLS_DEPLOY_KEY }}
+        run: |
+          # Set up SSH for private repo access
+          mkdir -p ~/.ssh
+          echo "$SKILLS_DEPLOY_KEY" > ~/.ssh/skills_deploy_key
+          chmod 600 ~/.ssh/skills_deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          # Clone private skills repo
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/skills_deploy_key -o StrictHostKeyChecking=no" \
+            git clone --depth 1 git@github.com:zivtech/zivtech-claude-skills.git /tmp/zivtech-skills
+
+          # Install Zivtech skills to Claude's skills directory
+          mkdir -p ~/.claude/skills
+          cp -r /tmp/zivtech-skills/.claude/skills/drupal-coding-standards ~/.claude/skills/
+          cp -r /tmp/zivtech-skills/.claude/skills/zivtech-development-workflow ~/.claude/skills/
+
+          # Install third-party drupal-security skill
+          npx skills add madsnorgaard/agent-resources@drupal-security -g -y
+
+          # Clean up
+          rm -rf /tmp/zivtech-skills ~/.ssh/skills_deploy_key
 
       - name: Claude Interactive Response
         uses: anthropics/claude-code-action@v1
