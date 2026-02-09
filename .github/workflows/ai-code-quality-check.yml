@@ -2,7 +2,7 @@ name: AI Code Quality and Security Check
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
     branches:
       - master
       - main
@@ -36,35 +36,38 @@ jobs:
           node-version: '20'
 
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@^1
 
-      - name: Install Zivtech Skills
+      - name: Cache Skills
+        uses: actions/cache@v4
+        with:
+          path: ~/.agents/skills
+          key: skills-v1-${{ hashFiles('.github/workflows/ai-code-quality-check.yml') }}
+
+      - name: Install Skills
         env:
           SKILLS_DEPLOY_KEY: ${{ secrets.ZIVTECH_SKILLS_DEPLOY_KEY }}
         run: |
+          set -e
+
           # Set up SSH for private repo access
           mkdir -p ~/.ssh
           echo "$SKILLS_DEPLOY_KEY" > ~/.ssh/skills_deploy_key
           chmod 600 ~/.ssh/skills_deploy_key
           ssh-keyscan github.com >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/skills_deploy_key -o StrictHostKeyChecking=no"
 
-          # Clone private skills repo
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/skills_deploy_key -o StrictHostKeyChecking=no" \
-            git clone --depth 1 git@github.com:zivtech/zivtech-claude-skills.git /tmp/zivtech-skills
+          # Install Zivtech private skills
+          npx skills add git@github.com:zivtech/zivtech-claude-skills.git -s drupal-coding-standards -s zivtech-development-workflow -g -y
 
-          # Install Zivtech skills to Claude's skills directory
-          mkdir -p ~/.claude/skills
-          cp -r /tmp/zivtech-skills/.claude/skills/drupal-coding-standards ~/.claude/skills/
-          cp -r /tmp/zivtech-skills/.claude/skills/zivtech-development-workflow ~/.claude/skills/
-
-          # Install third-party drupal-security skill
+          # Install third-party skills
           npx skills add madsnorgaard/agent-resources@drupal-security -g -y
 
           # Clean up
-          rm -rf /tmp/zivtech-skills ~/.ssh/skills_deploy_key
+          rm -f ~/.ssh/skills_deploy_key
 
-          echo "✓ Skills installed:"
-          ls -la ~/.claude/skills/
+          echo "Skills installed:"
+          npx skills ls -g
 
       - name: Run Code Review
         env:
@@ -83,15 +86,16 @@ jobs:
           ## STEP 1: Gather context
           - Check PR state: \`gh pr view $PR_NUMBER --json state -q '.state'\`
             - If CLOSED or MERGED: post \"### Code Review\\n\\nPR is [state], skipping review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
-          - Get diff: \`gh pr diff $PR_NUMBER\`
+          - Save diff to file: \`gh pr diff $PR_NUMBER > /tmp/pr-diff.txt\`
             - If empty (0 lines or only whitespace): post \"### Code Review\\n\\nNo code changes to review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
-          - Check diff size: \`gh pr diff $PR_NUMBER | wc -l\`
-            - If > 1500 lines: use large PR format (security only)
+          - Check diff size: \`wc -l < /tmp/pr-diff.txt\`
+            - If > 1500 lines: use large PR format (review all categories but only report 🔴 Critical issues, not 🟠 Warnings)
+          - Use /tmp/pr-diff.txt for all subsequent diff references
           - Get commits: \`gh pr view $PR_NUMBER --json commits -q '.commits[].messageHeadline'\`
           - Read any CLAUDE.md files in modified directories
-          - Read ~/.claude/skills/drupal-coding-standards/SKILL.md for Drupal coding standards
-          - Read ~/.claude/skills/zivtech-development-workflow/SKILL.md for Git commit conventions
-          - Read ~/.claude/skills/drupal-security/SKILL.md for security best practices
+          - Read ~/.agents/skills/drupal-coding-standards/SKILL.md for Drupal coding standards
+          - Read ~/.agents/skills/zivtech-development-workflow/SKILL.md for Git commit conventions
+          - Read ~/.agents/skills/drupal-security/SKILL.md for security best practices
           - Detect project type from files:
             - Drupal: composer.json with drupal/core, *.module files, web/sites/default
             - JS/Node: package.json without Drupal
@@ -155,8 +159,8 @@ jobs:
           - Interactive elements need accessible names
 
           ### 🐘 DRUPAL-SPECIFIC (apply if Drupal detected in STEP 1)
-          Reference ~/.claude/skills/drupal-coding-standards/SKILL.md for full Drupal coding standards.
-          Reference ~/.claude/skills/drupal-security/SKILL.md for security checks.
+          Reference ~/.agents/skills/drupal-coding-standards/SKILL.md for full Drupal coding standards.
+          Reference ~/.agents/skills/drupal-security/SKILL.md for security checks.
           Quick reference:
           - \`\\Drupal::\` needs leading backslash in procedural code
           - Use \`\$this->t()\` not \`t()\` in classes; \`Html::escape()\` not \`htmlspecialchars()\`
@@ -166,6 +170,18 @@ jobs:
           - Twig: \`|escape('html_attr')\` for attributes, \`{{ 'text'|t }}\`
           - JS: Use \`once()\` in Drupal.behaviors, \`'use strict'\`
           - Ref: https://project.pages.drupalcode.org/coding_standards/
+
+          ### 📦 DEPENDENCIES (composer.json, composer.lock, package.json)
+          - New unvetted packages added without justification
+          - Packages removed that provide security functionality
+          - Version downgrades on existing packages
+          - Packages with known vulnerabilities or abandoned status
+
+          ### ⚙️ DRUPAL CONFIG YAML (*.yml in config/ directories)
+          - Permission changes: new roles, expanded permissions, \`administer\` grants
+          - Access control: \`accessCheck: FALSE\`, route permission changes
+          - Exposed fields or views that could leak data
+          - Changes to user roles or authentication settings
 
           ### 📝 PR TITLE & COMMITS (Zivtech convention)
           - Format: \`TICKET-123: Description\` (imperative mood, capitalized)
@@ -183,9 +199,10 @@ jobs:
           Before reporting ANY issue, verify the line appears with a \`+\` prefix in the diff.
 
           ## STEP 4: Post review
-          Check for your existing review: \`gh pr view $PR_NUMBER --json comments -q '.comments[] | select(.author.login==\"github-actions\") | .body' | grep \"Generated with Claude\"\`
-          - If output contains match: update with \`gh pr comment $PR_NUMBER --edit-last --body \"<review>\"\`
-          - If no output: create new with \`gh pr comment $PR_NUMBER --body \"<review>\"\`
+          Find existing review comment by ID:
+          \`COMMENT_ID=\$(gh api \"repos/\$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments\" --jq '[.[] | select(.body | contains(\"Generated with Claude Code\")) | .id] | last')\`
+          - If COMMENT_ID is non-empty: update with \`gh api \"repos/\$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/\$COMMENT_ID\" -X PATCH -f body=\"<review>\"\`
+          - If COMMENT_ID is empty: create new with \`gh pr comment $PR_NUMBER --body \"<review>\"\`
 
           **Output format:**
           \`\`\`
@@ -198,6 +215,8 @@ jobs:
           **⚡ Performance:** None found
           **🔧 Maintainability:** None found
           **🔍 Functionality:** None found
+          **📦 Dependencies:** None found
+          **⚙️ Config:** None found
 
           ✨ Positive observation (always include one!)
 
@@ -216,19 +235,19 @@ jobs:
           \`\`\`
           ### Code Review ⚠️ Large PR
 
-          This PR has X lines changed. Reviewing security and metadata only.
+          This PR has X lines changed across N files. Only 🔴 Critical issues are reported for large PRs. Consider breaking large PRs into smaller, focused changes for more thorough review.
 
           **PR Title:** ✅ or ❌
           **Commits:** ✅ or ❌
 
           **🔒 Security:** [issues or None found]
-          **⚡ Performance:** Skipped (large PR)
-          **🔧 Maintainability:** Skipped (large PR)
-          **🔍 Functionality:** Skipped (large PR)
+          **⚡ Performance:** [issues or None found]
+          **🔧 Maintainability:** [issues or None found]
+          **🔍 Functionality:** [issues or None found]
+          **📦 Dependencies:** [issues or None found]
+          **⚙️ Config:** [issues or None found]
 
           ✨ Positive observation
-
-          Consider breaking large PRs into smaller, focused changes.
 
           ---
           🤖 Generated with Claude Code
@@ -236,7 +255,7 @@ jobs:
 
           If no issues in a category, show \"None found\".
           " \
-          --allowedTools "Bash(gh:*),Bash(git:*),Read,Glob,Grep" \
+          --allowedTools "Bash(gh:*),Bash(git:*),Bash(wc:*),Bash(cat:*),Read,Glob,Grep" \
           --max-turns 15
 
   # Interactive @claude mentions
@@ -245,7 +264,10 @@ jobs:
     if: |
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@claude')
+      contains(github.event.comment.body, '@claude') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -253,30 +275,38 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Zivtech Skills
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Skills
+        uses: actions/cache@v4
+        with:
+          path: ~/.agents/skills
+          key: skills-v1-${{ hashFiles('.github/workflows/ai-code-quality-check.yml') }}
+
+      - name: Install Skills
         env:
           SKILLS_DEPLOY_KEY: ${{ secrets.ZIVTECH_SKILLS_DEPLOY_KEY }}
         run: |
+          set -e
+
           # Set up SSH for private repo access
           mkdir -p ~/.ssh
           echo "$SKILLS_DEPLOY_KEY" > ~/.ssh/skills_deploy_key
           chmod 600 ~/.ssh/skills_deploy_key
           ssh-keyscan github.com >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/skills_deploy_key -o StrictHostKeyChecking=no"
 
-          # Clone private skills repo
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/skills_deploy_key -o StrictHostKeyChecking=no" \
-            git clone --depth 1 git@github.com:zivtech/zivtech-claude-skills.git /tmp/zivtech-skills
+          # Install Zivtech private skills
+          npx skills add git@github.com:zivtech/zivtech-claude-skills.git -s drupal-coding-standards -s zivtech-development-workflow -g -y
 
-          # Install Zivtech skills to Claude's skills directory
-          mkdir -p ~/.claude/skills
-          cp -r /tmp/zivtech-skills/.claude/skills/drupal-coding-standards ~/.claude/skills/
-          cp -r /tmp/zivtech-skills/.claude/skills/zivtech-development-workflow ~/.claude/skills/
-
-          # Install third-party drupal-security skill
+          # Install third-party skills
           npx skills add madsnorgaard/agent-resources@drupal-security -g -y
 
           # Clean up
-          rm -rf /tmp/zivtech-skills ~/.ssh/skills_deploy_key
+          rm -f ~/.ssh/skills_deploy_key
 
       - name: Claude Interactive Response
         uses: anthropics/claude-code-action@v1
