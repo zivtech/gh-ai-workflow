@@ -157,6 +157,16 @@ jobs:
 
             # Pre-fetch PR metadata so Claude doesn't need separate gh calls
             gh pr view "$PR_NUMBER" --json state,commits,title -q '{state: .state, title: .title, commits: [.commits[].messageHeadline]}' > /tmp/pr-metadata.json
+
+            # Pre-fetch existing review comment ID (if any) so Claude can update instead of creating
+            EXISTING_COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --jq '[.[] | select(.body | contains("Generated with Claude Code")) | .id] | last')
+            if [ -n "$EXISTING_COMMENT_ID" ] && [ "$EXISTING_COMMENT_ID" != "null" ]; then
+              echo "$EXISTING_COMMENT_ID" > /tmp/existing-comment-id.txt
+              echo "Found existing review comment: $EXISTING_COMMENT_ID"
+            else
+              echo "" > /tmp/existing-comment-id.txt
+              echo "No existing review comment found, will create new."
+            fi
           fi
 
       - name: Run Code Review
@@ -186,6 +196,7 @@ jobs:
             - If > 1500 lines: use large PR format (review all categories but only report 🔴 Critical issues, not 🟠 Warnings)
           - /tmp/pr-files-filtered.txt — list of files included in the review
           - /tmp/skills-reference.txt — coding standards, workflow conventions, and security checks (pre-concatenated)
+          - /tmp/existing-comment-id.txt — existing review comment ID to update (empty if none)
           Then in a second call, read any CLAUDE.md files in modified directories (derive paths from /tmp/pr-files-filtered.txt).
           Detect project type from the diff content (look for drupal/core in composer.json, *.module files, etc.).
 
@@ -287,10 +298,9 @@ jobs:
           Before reporting ANY issue, verify the line appears with a \`+\` prefix in the diff.
 
           ## STEP 4: Post review
-          Find existing review comment by ID:
-          \`COMMENT_ID=\$(gh api \"repos/\$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments\" --jq '[.[] | select(.body | contains(\"Generated with Claude Code\")) | .id] | last')\`
-          - If COMMENT_ID is non-empty: update with \`gh api \"repos/\$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/\$COMMENT_ID\" -X PATCH -f body=\"<review>\"\`
-          - If COMMENT_ID is empty: create new with \`gh pr comment $PR_NUMBER --body \"<review>\"\`
+          Read /tmp/existing-comment-id.txt to get the pre-fetched comment ID.
+          - If it contains a number: update with \`gh api \"repos/\$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/<ID>\" -X PATCH -f body=\"<review>\"\`
+          - If empty: create new with \`gh pr comment $PR_NUMBER --body \"<review>\"\`
 
           **Output format:**
           \`\`\`
