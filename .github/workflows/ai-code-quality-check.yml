@@ -70,6 +70,7 @@ jobs:
           npx skills ls -g
 
       - name: Prepare Diff
+        id: prep-diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -123,7 +124,28 @@ jobs:
           echo "Files in PR: $TOTAL | Files to review: $FILTERED | Diff lines: $DIFF_LINES"
           cat /tmp/pr-files-filtered.txt
 
+          # Fast-path: if no reviewable files, post comment directly and skip Claude
+          if [ "$FILTERED" -eq 0 ]; then
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            BODY="### Code Review
+
+          No reviewable code changes (only contrib/vendor changes).
+
+          ---
+          🤖 Generated with Claude Code"
+            COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --jq '[.[] | select(.body | contains("Generated with Claude Code")) | .id] | last')
+            if [ -n "$COMMENT_ID" ] && [ "$COMMENT_ID" != "null" ]; then
+              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/$COMMENT_ID" -X PATCH -f body="$BODY"
+            else
+              gh pr comment "$PR_NUMBER" --body "$BODY"
+            fi
+            echo "No reviewable files — skipping Claude invocation."
+          else
+            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Code Review
+        if: steps.prep-diff.outputs.has_diff == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -139,6 +161,7 @@ jobs:
           - REPORT issues ONLY on lines added/modified in this PR (lines with \`+\` prefix in diff)
           - DO NOT report issues on pre-existing code that wasn't changed in this PR
           - DO NOT read or review files outside the filtered set
+          - AVAILABLE TOOLS: For shell commands use only \`gh\`, \`git\`, \`wc\`, and \`cat\`. Use the Read tool for reading files. Use Glob/Grep for searching.
 
           ## STEP 1: Gather context
           - Check PR state: \`gh pr view $PR_NUMBER --json state -q '.state'\`
@@ -149,7 +172,7 @@ jobs:
             - If > 1500 lines: use large PR format (review all categories but only report 🔴 Critical issues, not 🟠 Warnings)
           - Use /tmp/pr-diff.txt for all subsequent diff references — do NOT call \`gh pr diff\` again
           - Get commits: \`gh pr view $PR_NUMBER --json commits -q '.commits[].messageHeadline'\`
-          - Read any CLAUDE.md files in modified directories
+          - Read any CLAUDE.md files in modified directories (use /tmp/pr-files-filtered.txt to derive directory paths)
           - Read ~/.agents/skills/drupal-coding-standards/SKILL.md for Drupal coding standards
           - Read ~/.agents/skills/zivtech-development-workflow/SKILL.md for Git commit conventions
           - Read ~/.agents/skills/drupal-security/SKILL.md for security best practices
