@@ -186,12 +186,12 @@ jobs:
           - REPORT issues ONLY on lines added/modified in this PR (lines with \`+\` prefix in diff)
           - DO NOT report issues on pre-existing code that wasn't changed in this PR
           - DO NOT read or review files outside the filtered set
-          - AVAILABLE TOOLS: For shell commands use only \`gh\`, \`git\`, \`wc\`, and \`cat\`. Use the Read tool for reading files. Use Glob/Grep for searching.
+          - AVAILABLE TOOLS: Use Read to read files, Write to write files, Glob/Grep to search. For shell: only \`git\` and \`cat\`. Do NOT run \`gh\` commands — all GitHub data is pre-fetched.
 
           ## STEP 1: Gather context (use PARALLEL tool calls to save turns)
           Read ALL of these files in a SINGLE parallel tool call:
           - /tmp/pr-metadata.json — PR state, title, and commit messages (pre-fetched)
-            - If state is CLOSED or MERGED: post \"### Code Review\\n\\nPR is [state], skipping review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
+            - If state is CLOSED or MERGED: write \"### Code Review\\n\\nPR is [state], skipping review.\\n\\n---\\n🤖 Generated with Claude Code\" to /tmp/review-body.txt and stop
           - /tmp/pr-diff.txt — the pre-filtered diff (ONLY file you should review)
             - If > 1500 lines: use large PR format (review all categories but only report 🔴 Critical issues, not 🟠 Warnings)
           - /tmp/pr-files-filtered.txt — list of files included in the review
@@ -297,12 +297,11 @@ jobs:
 
           Before reporting ANY issue, verify the line appears with a \`+\` prefix in the diff.
 
-          ## STEP 4: Post review
-          Read /tmp/existing-comment-id.txt to get the pre-fetched comment ID.
-          - If it contains a number: update with \`gh api \"repos/\$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/<ID>\" -X PATCH -f body=\"<review>\"\`
-          - If empty: create new with \`gh pr comment $PR_NUMBER --body \"<review>\"\`
+          ## STEP 4: Write review to file
+          Write the final review to /tmp/review-body.txt using the Write tool (or \`cat > /tmp/review-body.txt << 'ENDREVIEW' ... ENDREVIEW\`).
+          DO NOT post the review to GitHub — a subsequent workflow step handles that.
 
-          **Output format:**
+          **Output format (write this to /tmp/review-body.txt):**
           \`\`\`
           ### Code Review
 
@@ -353,8 +352,37 @@ jobs:
 
           If no issues in a category, show \"None found\".
           " \
-          --allowedTools "Bash(gh:*),Bash(git:*),Bash(wc:*),Bash(cat:*),Read,Glob,Grep" \
+          --allowedTools "Bash(git:*),Bash(cat:*),Read,Write,Glob,Grep" \
           --max-turns 20
+
+      - name: Post Review Comment
+        if: steps.prep-diff.outputs.has_diff == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+
+          if [ ! -s /tmp/review-body.txt ]; then
+            echo "Warning: /tmp/review-body.txt is empty or missing. Claude may have run out of turns."
+            echo "### Code Review
+
+          ⚠️ Review could not be completed (agent reached turn limit). Please re-run or review manually.
+
+          ---
+          🤖 Generated with Claude Code" > /tmp/review-body.txt
+          fi
+
+          COMMENT_ID=$(cat /tmp/existing-comment-id.txt 2>/dev/null | tr -d '[:space:]')
+          if [ -n "$COMMENT_ID" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/$COMMENT_ID" \
+              -X PATCH \
+              -F body=@/tmp/review-body.txt
+            echo "Updated existing comment $COMMENT_ID"
+          else
+            gh pr comment "$PR_NUMBER" --body-file /tmp/review-body.txt
+            echo "Created new comment"
+          fi
 
   # Interactive @claude mentions
   # Note: Broader Bash access allowed here for interactive flexibility
