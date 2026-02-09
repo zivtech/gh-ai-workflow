@@ -83,13 +83,13 @@ jobs:
           gh pr diff "$PR_NUMBER" > /tmp/pr-diff-full.txt
 
           # Filter diff sections to only include reviewable files
-          # Keeps: web/modules/custom/, web/themes/custom/, composer.json, composer.lock, package.json
+          # Keeps: modules/custom/, themes/custom/ (any web root), composer.json, composer.lock, package.json
           # Preserves exact unified diff format with line numbers
           awk '
             /^diff --git/ {
               include = 0
-              if ($0 ~ /web\/modules\/custom\// ||
-                  $0 ~ /web\/themes\/custom\// ||
+              if ($0 ~ /modules\/custom\// ||
+                  $0 ~ /themes\/custom\// ||
                   $0 ~ /composer\.json/ ||
                   $0 ~ /composer\.lock/ ||
                   $0 ~ /package\.json/) {
@@ -155,7 +155,7 @@ jobs:
           Review PR #$PR_NUMBER for bugs, security issues, and coding standards.
 
           ## CRITICAL: Scope of review
-          - The diff has been pre-filtered to only include custom code (web/modules/custom/, web/themes/custom/) and dependency files
+          - The diff has been pre-filtered to only include custom code (modules/custom/, themes/custom/) and dependency files
           - /tmp/pr-diff.txt contains ONLY the files you should review
           - /tmp/pr-files-filtered.txt lists the files included in the review
           - REPORT issues ONLY on lines added/modified in this PR (lines with \`+\` prefix in diff)
