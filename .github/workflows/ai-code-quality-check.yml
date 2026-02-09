@@ -142,6 +142,21 @@ jobs:
             echo "No reviewable files — skipping Claude invocation."
           else
             echo "has_diff=true" >> "$GITHUB_OUTPUT"
+
+            # Pre-concatenate skill references so Claude reads one file instead of three
+            {
+              echo "=== DRUPAL CODING STANDARDS ==="
+              cat ~/.agents/skills/drupal-coding-standards/SKILL.md 2>/dev/null || echo "(not installed)"
+              echo ""
+              echo "=== ZIVTECH DEVELOPMENT WORKFLOW ==="
+              cat ~/.agents/skills/zivtech-development-workflow/SKILL.md 2>/dev/null || echo "(not installed)"
+              echo ""
+              echo "=== DRUPAL SECURITY ==="
+              cat ~/.agents/skills/drupal-security/SKILL.md 2>/dev/null || echo "(not installed)"
+            } > /tmp/skills-reference.txt
+
+            # Pre-fetch PR metadata so Claude doesn't need separate gh calls
+            gh pr view "$PR_NUMBER" --json state,commits,title -q '{state: .state, title: .title, commits: [.commits[].messageHeadline]}' > /tmp/pr-metadata.json
           fi
 
       - name: Run Code Review
@@ -163,23 +178,16 @@ jobs:
           - DO NOT read or review files outside the filtered set
           - AVAILABLE TOOLS: For shell commands use only \`gh\`, \`git\`, \`wc\`, and \`cat\`. Use the Read tool for reading files. Use Glob/Grep for searching.
 
-          ## STEP 1: Gather context
-          - Check PR state: \`gh pr view $PR_NUMBER --json state -q '.state'\`
-            - If CLOSED or MERGED: post \"### Code Review\\n\\nPR is [state], skipping review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
-          - Read the pre-filtered diff: \`cat /tmp/pr-diff.txt\`
-            - If empty (0 lines): post \"### Code Review\\n\\nNo reviewable code changes (only contrib/vendor changes).\\n\\n---\\n🤖 Generated with Claude Code\" and stop
-          - Check diff size: \`wc -l < /tmp/pr-diff.txt\`
+          ## STEP 1: Gather context (use PARALLEL tool calls to save turns)
+          Read ALL of these files in a SINGLE parallel tool call:
+          - /tmp/pr-metadata.json — PR state, title, and commit messages (pre-fetched)
+            - If state is CLOSED or MERGED: post \"### Code Review\\n\\nPR is [state], skipping review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
+          - /tmp/pr-diff.txt — the pre-filtered diff (ONLY file you should review)
             - If > 1500 lines: use large PR format (review all categories but only report 🔴 Critical issues, not 🟠 Warnings)
-          - Use /tmp/pr-diff.txt for all subsequent diff references — do NOT call \`gh pr diff\` again
-          - Get commits: \`gh pr view $PR_NUMBER --json commits -q '.commits[].messageHeadline'\`
-          - Read any CLAUDE.md files in modified directories (use /tmp/pr-files-filtered.txt to derive directory paths)
-          - Read ~/.agents/skills/drupal-coding-standards/SKILL.md for Drupal coding standards
-          - Read ~/.agents/skills/zivtech-development-workflow/SKILL.md for Git commit conventions
-          - Read ~/.agents/skills/drupal-security/SKILL.md for security best practices
-          - Detect project type from files:
-            - Drupal: composer.json with drupal/core, *.module files, web/sites/default
-            - JS/Node: package.json without Drupal
-            - Generic PHP: composer.json without Drupal, or standalone *.php files
+          - /tmp/pr-files-filtered.txt — list of files included in the review
+          - /tmp/skills-reference.txt — coding standards, workflow conventions, and security checks (pre-concatenated)
+          Then in a second call, read any CLAUDE.md files in modified directories (derive paths from /tmp/pr-files-filtered.txt).
+          Detect project type from the diff content (look for drupal/core in composer.json, *.module files, etc.).
 
           ## STEP 2: What to check (ONLY in added/changed lines)
 
@@ -336,7 +344,7 @@ jobs:
           If no issues in a category, show \"None found\".
           " \
           --allowedTools "Bash(gh:*),Bash(git:*),Bash(wc:*),Bash(cat:*),Read,Glob,Grep" \
-          --max-turns 15
+          --max-turns 20
 
   # Interactive @claude mentions
   # Note: Broader Bash access allowed here for interactive flexibility
