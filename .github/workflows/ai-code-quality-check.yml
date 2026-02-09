@@ -69,6 +69,60 @@ jobs:
           echo "Skills installed:"
           npx skills ls -g
 
+      - name: Prepare Diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Regex pattern to exclude files (optional, set in repo vars)
+          FILE_EXCLUDE_REGEX: ${{ vars.CODE_REVIEW_FILE_EXCLUDE_REGEX }}
+        run: |
+          set -e
+
+          # Get full diff from PR
+          gh pr diff "$PR_NUMBER" > /tmp/pr-diff-full.txt
+
+          # Filter diff sections to only include reviewable files
+          # Keeps: web/modules/custom/, web/themes/custom/, composer.json, composer.lock, package.json
+          # Preserves exact unified diff format with line numbers
+          awk '
+            /^diff --git/ {
+              include = 0
+              if ($0 ~ /web\/modules\/custom\// ||
+                  $0 ~ /web\/themes\/custom\// ||
+                  $0 ~ /composer\.json/ ||
+                  $0 ~ /composer\.lock/ ||
+                  $0 ~ /package\.json/) {
+                include = 1
+              }
+            }
+            include { print }
+          ' /tmp/pr-diff-full.txt > /tmp/pr-diff-included.txt
+
+          # Apply exclude regex if set
+          if [ -n "$FILE_EXCLUDE_REGEX" ]; then
+            awk -v regex="$FILE_EXCLUDE_REGEX" '
+              /^diff --git/ {
+                file = $0
+                sub(/.*b\//, "", file)
+                include = 1
+                if (file ~ regex) { include = 0 }
+              }
+              include { print }
+            ' /tmp/pr-diff-included.txt > /tmp/pr-diff.txt
+          else
+            mv /tmp/pr-diff-included.txt /tmp/pr-diff.txt
+          fi
+
+          # Extract list of files being reviewed
+          grep '^diff --git' /tmp/pr-diff.txt | sed 's|diff --git a/.* b/||' > /tmp/pr-files-filtered.txt || true
+
+          # Summary for logs
+          TOTAL=$(grep -c '^diff --git' /tmp/pr-diff-full.txt || echo 0)
+          FILTERED=$(wc -l < /tmp/pr-files-filtered.txt | tr -d ' ')
+          DIFF_LINES=$(wc -l < /tmp/pr-diff.txt | tr -d ' ')
+          echo "Files in PR: $TOTAL | Files to review: $FILTERED | Diff lines: $DIFF_LINES"
+          cat /tmp/pr-files-filtered.txt
+
       - name: Run Code Review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -79,18 +133,21 @@ jobs:
           Review PR #$PR_NUMBER for bugs, security issues, and coding standards.
 
           ## CRITICAL: Scope of review
-          - You MAY read full files, browse the codebase, and examine surrounding code to understand context
+          - The diff has been pre-filtered to only include custom code (web/modules/custom/, web/themes/custom/) and dependency files
+          - /tmp/pr-diff.txt contains ONLY the files you should review
+          - /tmp/pr-files-filtered.txt lists the files included in the review
           - REPORT issues ONLY on lines added/modified in this PR (lines with \`+\` prefix in diff)
           - DO NOT report issues on pre-existing code that wasn't changed in this PR
+          - DO NOT read or review files outside the filtered set
 
           ## STEP 1: Gather context
           - Check PR state: \`gh pr view $PR_NUMBER --json state -q '.state'\`
             - If CLOSED or MERGED: post \"### Code Review\\n\\nPR is [state], skipping review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
-          - Save diff to file: \`gh pr diff $PR_NUMBER > /tmp/pr-diff.txt\`
-            - If empty (0 lines or only whitespace): post \"### Code Review\\n\\nNo code changes to review.\\n\\n---\\n🤖 Generated with Claude Code\" and stop
+          - Read the pre-filtered diff: \`cat /tmp/pr-diff.txt\`
+            - If empty (0 lines): post \"### Code Review\\n\\nNo reviewable code changes (only contrib/vendor changes).\\n\\n---\\n🤖 Generated with Claude Code\" and stop
           - Check diff size: \`wc -l < /tmp/pr-diff.txt\`
             - If > 1500 lines: use large PR format (review all categories but only report 🔴 Critical issues, not 🟠 Warnings)
-          - Use /tmp/pr-diff.txt for all subsequent diff references
+          - Use /tmp/pr-diff.txt for all subsequent diff references — do NOT call \`gh pr diff\` again
           - Get commits: \`gh pr view $PR_NUMBER --json commits -q '.commits[].messageHeadline'\`
           - Read any CLAUDE.md files in modified directories
           - Read ~/.agents/skills/drupal-coding-standards/SKILL.md for Drupal coding standards
