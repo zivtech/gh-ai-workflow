@@ -135,7 +135,7 @@ jobs:
           🤖 Generated with Claude Code"
             COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --jq '[.[] | select(.body | contains("Generated with Claude Code")) | .id] | last')
             if [ -n "$COMMENT_ID" ] && [ "$COMMENT_ID" != "null" ]; then
-              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/$COMMENT_ID" -X PATCH -f body="$BODY"
+              gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" -X PATCH -f body="$BODY"
             else
               gh pr comment "$PR_NUMBER" --body "$BODY"
             fi
@@ -375,7 +375,7 @@ jobs:
 
           COMMENT_ID=$(cat /tmp/existing-comment-id.txt 2>/dev/null | tr -d '[:space:]')
           if [ -n "$COMMENT_ID" ]; then
-            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments/$COMMENT_ID" \
+            gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
               -X PATCH \
               -F body=@/tmp/review-body.txt
             echo "Updated existing comment $COMMENT_ID"
