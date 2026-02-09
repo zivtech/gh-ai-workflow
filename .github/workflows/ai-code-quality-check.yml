@@ -375,9 +375,9 @@ jobs:
 
           COMMENT_ID=$(cat /tmp/existing-comment-id.txt 2>/dev/null | tr -d '[:space:]')
           if [ -n "$COMMENT_ID" ]; then
-            gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
-              -X PATCH \
-              -F body=@/tmp/review-body.txt
+            jq -Rs '{"body": .}' /tmp/review-body.txt | \
+              gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
+                -X PATCH --input -
             echo "Updated existing comment $COMMENT_ID"
           else
             gh pr comment "$PR_NUMBER" --body-file /tmp/review-body.txt
